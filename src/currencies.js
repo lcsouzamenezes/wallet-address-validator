@@ -224,25 +224,25 @@ var CURRENCIES = [{
     validator: BinanceValidator,
 },
 {
-    name: 'Polkadot',
+    name: 'polkadot',
     symbol: 'dot',
     validator: DotValidator
 },
 {
-    name: 'Cardano',
+    name: 'cardano',
     symbol: 'ada',
     bech32Hrp: { prod: ['addr'], testnet: ['addr']},
     validator: ADAValidator
 },
 {
-    name: 'Solana',
+    name: 'solana',
     symbol: 'sol',
     validator: Base58Validator,
     maxLength: 44,
     minLength: 43
 },
 {
-    name: 'Tezos',
+    name: 'tezos',
     symbol: 'xtz',
     validator: XTZValidator
 },
