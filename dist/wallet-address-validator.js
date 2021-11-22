@@ -10,7 +10,9 @@ var _Buffer = require('safe-buffer').Buffer
 function base (ALPHABET) {
   if (ALPHABET.length >= 255) { throw new TypeError('Alphabet too long') }
   var BASE_MAP = new Uint8Array(256)
-  BASE_MAP.fill(255)
+  for (var j = 0; j < BASE_MAP.length; j++) {
+    BASE_MAP[j] = 255
+  }
   for (var i = 0; i < ALPHABET.length; i++) {
     var x = ALPHABET.charAt(i)
     var xc = x.charCodeAt(0)
@@ -22,6 +24,7 @@ function base (ALPHABET) {
   var FACTOR = Math.log(BASE) / Math.log(256) // log(BASE) / log(256), rounded up
   var iFACTOR = Math.log(256) / Math.log(BASE) // log(256) / log(BASE), rounded up
   function encode (source) {
+    if (Array.isArray(source) || source instanceof Uint8Array) { source = _Buffer.from(source) }
     if (!_Buffer.isBuffer(source)) { throw new TypeError('Expected Buffer') }
     if (source.length === 0) { return '' }
         // Skip & count leading zeroes.
@@ -64,8 +67,6 @@ function base (ALPHABET) {
     if (typeof source !== 'string') { throw new TypeError('Expected String') }
     if (source.length === 0) { return _Buffer.alloc(0) }
     var psz = 0
-        // Skip leading spaces.
-    if (source[psz] === ' ') { return }
         // Skip and count leading '1's.
     var zeroes = 0
     var length = 0
@@ -92,8 +93,6 @@ function base (ALPHABET) {
       length = i
       psz++
     }
-        // Skip trailing spaces.
-    if (source[psz] === ' ') { return }
         // Skip leading zeroes in b256.
     var it4 = size - length
     while (it4 !== size && b256[it4] === 0) {
@@ -120,7 +119,7 @@ function base (ALPHABET) {
 }
 module.exports = base
 
-},{"safe-buffer":7}],2:[function(require,module,exports){
+},{"safe-buffer":36}],2:[function(require,module,exports){
 'use strict'
 
 exports.byteLength = byteLength
@@ -188,8 +187,7 @@ function toByteArray (b64) {
     ? validLen - 4
     : validLen
 
-  var i
-  for (i = 0; i < len; i += 4) {
+  for (var i = 0; i < len; i += 4) {
     tmp =
       (revLookup[b64.charCodeAt(i)] << 18) |
       (revLookup[b64.charCodeAt(i + 1)] << 12) |
@@ -275,7 +273,2124 @@ function fromByteArray (uint8) {
 }
 
 },{}],3:[function(require,module,exports){
-(function (Buffer){
+(function (Buffer){(function (){
+/* bignumber.js v1.3.0 https://github.com/MikeMcl/bignumber.js/LICENCE */
+
+/*jslint bitwise: true, eqeq: true, plusplus: true, sub: true, white: true, maxerr: 500 */
+/*global module */
+
+/*
+  bignumber.js v1.3.0
+  A JavaScript library for arbitrary-precision arithmetic.
+  https://github.com/MikeMcl/bignumber.js
+  Copyright (c) 2012 Michael Mclaughlin <M8ch88l@gmail.com>
+  MIT Expat Licence
+*/
+
+/*********************************** DEFAULTS ************************************/
+
+/*
+ * The default values below must be integers within the stated ranges (inclusive).
+ * Most of these values can be changed during run-time using BigNumber.config().
+ */
+
+/*
+ * The limit on the value of DECIMAL_PLACES, TO_EXP_NEG, TO_EXP_POS, MIN_EXP,
+ * MAX_EXP, and the argument to toFixed, toPrecision and toExponential, beyond
+ * which an exception is thrown (if ERRORS is true).
+ */
+var MAX = 1E9,                                   // 0 to 1e+9
+
+    // Limit of magnitude of exponent argument to toPower.
+    MAX_POWER = 1E6,                             // 1 to 1e+6
+
+    // The maximum number of decimal places for operations involving division.
+    DECIMAL_PLACES = 20,                         // 0 to MAX
+
+    /*
+     * The rounding mode used when rounding to the above decimal places, and when
+     * using toFixed, toPrecision and toExponential, and round (default value).
+     * UP         0 Away from zero.
+     * DOWN       1 Towards zero.
+     * CEIL       2 Towards +Infinity.
+     * FLOOR      3 Towards -Infinity.
+     * HALF_UP    4 Towards nearest neighbour. If equidistant, up.
+     * HALF_DOWN  5 Towards nearest neighbour. If equidistant, down.
+     * HALF_EVEN  6 Towards nearest neighbour. If equidistant, towards even neighbour.
+     * HALF_CEIL  7 Towards nearest neighbour. If equidistant, towards +Infinity.
+     * HALF_FLOOR 8 Towards nearest neighbour. If equidistant, towards -Infinity.
+     */
+    ROUNDING_MODE = 4,                           // 0 to 8
+
+    // EXPONENTIAL_AT : [TO_EXP_NEG , TO_EXP_POS]
+
+    // The exponent value at and beneath which toString returns exponential notation.
+    // Number type: -7
+    TO_EXP_NEG = -7,                             // 0 to -MAX
+
+    // The exponent value at and above which toString returns exponential notation.
+    // Number type: 21
+    TO_EXP_POS = 21,                             // 0 to MAX
+
+    // RANGE : [MIN_EXP, MAX_EXP]
+
+    // The minimum exponent value, beneath which underflow to zero occurs.
+    // Number type: -324  (5e-324)
+    MIN_EXP = -MAX,                              // -1 to -MAX
+
+    // The maximum exponent value, above which overflow to Infinity occurs.
+    // Number type:  308  (1.7976931348623157e+308)
+    MAX_EXP = MAX,                               // 1 to MAX
+
+    // Whether BigNumber Errors are ever thrown.
+    // CHANGE parseInt to parseFloat if changing ERRORS to false.
+    ERRORS = true,                               // true or false
+    parse = parseInt,                            // parseInt or parseFloat
+
+/***********************************************************************************/
+
+    P = BigNumber.prototype,
+    DIGITS = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ$_',
+    outOfRange,
+    id = 0,
+    isValid = /^-?(\d+(\.\d*)?|\.\d+)(e[+-]?\d+)?$/i,
+    trim = String.prototype.trim || function () {return this.replace(/^\s+|\s+$/g, '')},
+    ONE = BigNumber(1);
+
+
+// CONSTRUCTOR
+
+
+/*
+ * The exported function.
+ * Create and return a new instance of a BigNumber object.
+ *
+ * n {number|string|BigNumber} A numeric value.
+ * [b] {number} The base of n. Integer, 2 to 64 inclusive.
+ */
+function BigNumber( n, b ) {
+    var e, i, isNum, digits, valid, orig,
+        x = this;
+
+    // Enable constructor usage without new.
+    if ( !(x instanceof BigNumber) ) {
+        return new BigNumber( n, b )
+    }
+
+    // Duplicate.
+    if ( n instanceof BigNumber ) {
+        id = 0;
+
+        // e is undefined.
+        if ( b !== e ) {
+            n += ''
+        } else {
+            x['s'] = n['s'];
+            x['e'] = n['e'];
+            x['c'] = ( n = n['c'] ) ? n.slice() : n;
+            return;
+        }
+    }
+
+    // If number, check if minus zero.
+    if ( typeof n != 'string' ) {
+        n = ( isNum = typeof n == 'number' ||
+            Object.prototype.toString.call(n) == '[object Number]' ) &&
+                n === 0 && 1 / n < 0 ? '-0' : n + '';
+    }
+
+    orig = n;
+
+    if ( b === e && isValid.test(n) ) {
+
+        // Determine sign.
+        x['s'] = n.charAt(0) == '-' ? ( n = n.slice(1), -1 ) : 1;
+
+    // Either n is not a valid BigNumber or a base has been specified.
+    } else {
+
+        // Enable exponential notation to be used with base 10 argument.
+        // Ensure return value is rounded to DECIMAL_PLACES as with other bases.
+        if ( b == 10 ) {
+
+            return setMode( n, DECIMAL_PLACES, ROUNDING_MODE );
+        }
+
+        n = trim.call(n).replace( /^\+(?!-)/, '' );
+
+        x['s'] = n.charAt(0) == '-' ? ( n = n.replace( /^-(?!-)/, '' ), -1 ) : 1;
+
+        if ( b != null ) {
+
+            if ( ( b == (b | 0) || !ERRORS ) &&
+              !( outOfRange = !( b >= 2 && b < 65 ) ) ) {
+
+                digits = '[' + DIGITS.slice( 0, b = b | 0 ) + ']+';
+
+                // Before non-decimal number validity test and base conversion
+                // remove the `.` from e.g. '1.', and replace e.g. '.1' with '0.1'.
+                n = n.replace( /\.$/, '' ).replace( /^\./, '0.' );
+
+                // Any number in exponential form will fail due to the e+/-.
+                if ( valid = new RegExp(
+                  '^' + digits + '(?:\\.' + digits + ')?$', b < 37 ? 'i' : '' ).test(n) ) {
+
+                    if ( isNum ) {
+
+                        if ( n.replace( /^0\.0*|\./, '' ).length > 15 ) {
+
+                            // 'new BigNumber() number type has more than 15 significant digits: {n}'
+                            ifExceptionsThrow( orig, 0 );
+                        }
+
+                        // Prevent later check for length on converted number.
+                        isNum = !isNum;
+                    }
+                    n = convert( n, 10, b, x['s'] );
+
+                } else if ( n != 'Infinity' && n != 'NaN' ) {
+
+                    // 'new BigNumber() not a base {b} number: {n}'
+                    ifExceptionsThrow( orig, 1, b );
+                    n = 'NaN';
+                }
+            } else {
+
+                // 'new BigNumber() base not an integer: {b}'
+                // 'new BigNumber() base out of range: {b}'
+                ifExceptionsThrow( b, 2 );
+
+                // Ignore base.
+                valid = isValid.test(n);
+            }
+        } else {
+            valid = isValid.test(n);
+        }
+
+        if ( !valid ) {
+
+            // Infinity/NaN
+            x['c'] = x['e'] = null;
+
+            // NaN
+            if ( n != 'Infinity' ) {
+
+                // No exception on NaN.
+                if ( n != 'NaN' ) {
+
+                    // 'new BigNumber() not a number: {n}'
+                    ifExceptionsThrow( orig, 3 );
+                }
+                x['s'] = null;
+            }
+            id = 0;
+
+            return;
+        }
+    }
+
+    // Decimal point?
+    if ( ( e = n.indexOf('.') ) > -1 ) {
+        n = n.replace( '.', '' );
+    }
+
+    // Exponential form?
+    if ( ( i = n.search( /e/i ) ) > 0 ) {
+
+        // Determine exponent.
+        if ( e < 0 ) {
+            e = i;
+        }
+        e += +n.slice( i + 1 );
+        n = n.substring( 0, i );
+
+    } else if ( e < 0 ) {
+
+        // Integer.
+        e = n.length;
+    }
+
+    // Determine leading zeros.
+    for ( i = 0; n.charAt(i) == '0'; i++ ) {
+    }
+
+    b = n.length;
+
+    // Disallow numbers with over 15 significant digits if number type.
+    if ( isNum && b > 15 && n.slice(i).length > 15 ) {
+
+        // 'new BigNumber() number type has more than 15 significant digits: {n}'
+        ifExceptionsThrow( orig, 0 );
+    }
+    id = 0;
+
+    // Overflow?
+    if ( ( e -= i + 1 ) > MAX_EXP ) {
+
+        // Infinity.
+        x['c'] = x['e'] = null;
+
+    // Zero or underflow?
+    } else if ( i == b || e < MIN_EXP ) {
+
+        // Zero.
+        x['c'] = [ x['e'] = 0 ];
+    } else {
+
+        // Determine trailing zeros.
+        for ( ; n.charAt(--b) == '0'; ) {
+        }
+
+        x['e'] = e;
+        x['c'] = [];
+
+        // Convert string to array of digits (without leading and trailing zeros).
+        for ( e = 0; i <= b; x['c'][e++] = +n.charAt(i++) ) {
+        }
+    }
+}
+
+
+// CONSTRUCTOR PROPERTIES/METHODS
+
+
+BigNumber['ROUND_UP'] = 0;
+BigNumber['ROUND_DOWN'] = 1;
+BigNumber['ROUND_CEIL'] = 2;
+BigNumber['ROUND_FLOOR'] = 3;
+BigNumber['ROUND_HALF_UP'] = 4;
+BigNumber['ROUND_HALF_DOWN'] = 5;
+BigNumber['ROUND_HALF_EVEN'] = 6;
+BigNumber['ROUND_HALF_CEIL'] = 7;
+BigNumber['ROUND_HALF_FLOOR'] = 8;
+
+/*
+ * Create an instance from a Buffer
+ */
+BigNumber['fromBuffer'] = function (buf, opts) {
+
+    if (!opts) opts = {};
+
+    var endian = { 1 : 'big', '-1' : 'little' }[opts.endian]
+        || opts.endian || 'big'
+    ;
+
+    var size = opts.size === 'auto' ? Math.ceil(buf.length) : (opts.size || 1);
+
+    if (buf.length % size !== 0) {
+        throw new RangeError('Buffer length (' + buf.length + ')'
+            + ' must be a multiple of size (' + size + ')'
+        );
+    }
+
+    var hex = [];
+    for (var i = 0; i < buf.length; i += size) {
+        var chunk = [];
+        for (var j = 0; j < size; j++) {
+            chunk.push(buf[
+                i + (endian === 'big' ? j : (size - j - 1))
+            ]);
+        }
+
+        hex.push(chunk
+            .map(function (c) {
+                return (c < 16 ? '0' : '') + c.toString(16);
+            })
+            .join('')
+        );
+    }
+
+    return BigNumber(hex.join(''), 16);
+
+};
+
+/*
+ * Configure infrequently-changing library-wide settings.
+ *
+ * Accept an object or an argument list, with one or many of the following
+ * properties or parameters respectively:
+ * [ DECIMAL_PLACES [, ROUNDING_MODE [, EXPONENTIAL_AT [, RANGE [, ERRORS ]]]]]
+ *
+ * E.g.
+ * BigNumber.config(20, 4) is equivalent to
+ * BigNumber.config({ DECIMAL_PLACES : 20, ROUNDING_MODE : 4 })
+ * Ignore properties/parameters set to null or undefined.
+ *
+ * Return an object with the properties current values.
+ */
+BigNumber['config'] = function () {
+    var v, p,
+        i = 0,
+        r = {},
+        a = arguments,
+        o = a[0],
+        c = 'config',
+        inRange = function ( n, lo, hi ) {
+          return !( ( outOfRange = n < lo || n > hi ) ||
+            parse(n) != n && n !== 0 );
+        },
+        has = o && typeof o == 'object'
+          ? function () {if ( o.hasOwnProperty(p) ) return ( v = o[p] ) != null}
+          : function () {if ( a.length > i ) return ( v = a[i++] ) != null};
+
+    // [DECIMAL_PLACES] {number} Integer, 0 to MAX inclusive.
+    if ( has( p = 'DECIMAL_PLACES' ) ) {
+
+        if ( inRange( v, 0, MAX ) ) {
+            DECIMAL_PLACES = v | 0;
+        } else {
+
+            // 'config() DECIMAL_PLACES not an integer: {v}'
+            // 'config() DECIMAL_PLACES out of range: {v}'
+            ifExceptionsThrow( v, p, c );
+        }
+    }
+    r[p] = DECIMAL_PLACES;
+
+    // [ROUNDING_MODE] {number} Integer, 0 to 8 inclusive.
+    if ( has( p = 'ROUNDING_MODE' ) ) {
+
+        if ( inRange( v, 0, 8 ) ) {
+            ROUNDING_MODE = v | 0;
+        } else {
+
+            // 'config() ROUNDING_MODE not an integer: {v}'
+            // 'config() ROUNDING_MODE out of range: {v}'
+            ifExceptionsThrow( v, p, c );
+        }
+    }
+    r[p] = ROUNDING_MODE;
+
+    /*
+     * [EXPONENTIAL_AT] {number|number[]} Integer, -MAX to MAX inclusive or
+     * [ integer -MAX to 0 inclusive, 0 to MAX inclusive ].
+     */
+    if ( has( p = 'EXPONENTIAL_AT' ) ) {
+
+        if ( inRange( v, -MAX, MAX ) ) {
+            TO_EXP_NEG = -( TO_EXP_POS = ~~( v < 0 ? -v : +v ) );
+        } else if ( !outOfRange && v && inRange( v[0], -MAX, 0 ) &&
+          inRange( v[1], 0, MAX ) ) {
+            TO_EXP_NEG = ~~v[0];
+            TO_EXP_POS = ~~v[1];
+        } else {
+
+            // 'config() EXPONENTIAL_AT not an integer or not [integer, integer]: {v}'
+            // 'config() EXPONENTIAL_AT out of range or not [negative, positive: {v}'
+            ifExceptionsThrow( v, p, c, 1 );
+        }
+    }
+    r[p] = [ TO_EXP_NEG, TO_EXP_POS ];
+
+    /*
+     * [RANGE][ {number|number[]} Non-zero integer, -MAX to MAX inclusive or
+     * [ integer -MAX to -1 inclusive, integer 1 to MAX inclusive ].
+     */
+    if ( has( p = 'RANGE' ) ) {
+
+        if ( inRange( v, -MAX, MAX ) && ~~v ) {
+            MIN_EXP = -( MAX_EXP = ~~( v < 0 ? -v : +v ) );
+        } else if ( !outOfRange && v && inRange( v[0], -MAX, -1 ) &&
+          inRange( v[1], 1, MAX ) ) {
+            MIN_EXP = ~~v[0], MAX_EXP = ~~v[1];
+        } else {
+
+            // 'config() RANGE not a non-zero integer or not [integer, integer]: {v}'
+            // 'config() RANGE out of range or not [negative, positive: {v}'
+            ifExceptionsThrow( v, p, c, 1, 1 );
+        }
+    }
+    r[p] = [ MIN_EXP, MAX_EXP ];
+
+    // [ERRORS] {boolean|number} true, false, 1 or 0.
+    if ( has( p = 'ERRORS' ) ) {
+
+        if ( v === !!v || v === 1 || v === 0 ) {
+            parse = ( outOfRange = id = 0, ERRORS = !!v )
+              ? parseInt
+              : parseFloat;
+        } else {
+
+            // 'config() ERRORS not a boolean or binary digit: {v}'
+            ifExceptionsThrow( v, p, c, 0, 0, 1 );
+        }
+    }
+    r[p] = ERRORS;
+
+    return r;
+};
+
+
+// PRIVATE FUNCTIONS
+
+
+// Assemble error messages. Throw BigNumber Errors.
+function ifExceptionsThrow( arg, i, j, isArray, isRange, isErrors) {
+
+    if ( ERRORS ) {
+        var error,
+            method = ['new BigNumber', 'cmp', 'div', 'eq', 'gt', 'gte', 'lt',
+                 'lte', 'minus', 'mod', 'plus', 'times', 'toFr'
+                ][ id ? id < 0 ? -id : id : 1 / id < 0 ? 1 : 0 ] + '()',
+            message = outOfRange ? ' out of range' : ' not a' +
+              ( isRange ? ' non-zero' : 'n' ) + ' integer';
+
+        message = ( [
+            method + ' number type has more than 15 significant digits',
+            method + ' not a base ' + j + ' number',
+            method + ' base' + message,
+            method + ' not a number' ][i] ||
+              j + '() ' + i + ( isErrors
+                ? ' not a boolean or binary digit'
+                : message + ( isArray
+                  ? ' or not [' + ( outOfRange
+                    ? ' negative, positive'
+                    : ' integer, integer' ) + ' ]'
+                  : '' ) ) ) + ': ' + arg;
+
+        outOfRange = id = 0;
+        error = new Error(message);
+        error['name'] = 'BigNumber Error';
+
+        throw error;
+    }
+}
+
+
+/*
+ * Convert a numeric string of baseIn to a numeric string of baseOut.
+ */
+function convert( nStr, baseOut, baseIn, sign ) {
+    var e, dvs, dvd, nArr, fracArr, fracBN;
+
+    // Convert string of base bIn to an array of numbers of baseOut.
+    // Eg. strToArr('255', 10) where baseOut is 16, returns [15, 15].
+    // Eg. strToArr('ff', 16)  where baseOut is 10, returns [2, 5, 5].
+    function strToArr( str, bIn ) {
+        var j,
+            i = 0,
+            strL = str.length,
+            arrL,
+            arr = [0];
+
+        for ( bIn = bIn || baseIn; i < strL; i++ ) {
+
+            for ( arrL = arr.length, j = 0; j < arrL; arr[j] *= bIn, j++ ) {
+            }
+
+            for ( arr[0] += DIGITS.indexOf( str.charAt(i) ), j = 0;
+                  j < arr.length;
+                  j++ ) {
+
+                if ( arr[j] > baseOut - 1 ) {
+
+                    if ( arr[j + 1] == null ) {
+                        arr[j + 1] = 0;
+                    }
+                    arr[j + 1] += arr[j] / baseOut ^ 0;
+                    arr[j] %= baseOut;
+                }
+            }
+        }
+
+        return arr.reverse();
+    }
+
+    // Convert array to string.
+    // E.g. arrToStr( [9, 10, 11] ) becomes '9ab' (in bases above 11).
+    function arrToStr( arr ) {
+        var i = 0,
+            arrL = arr.length,
+            str = '';
+
+        for ( ; i < arrL; str += DIGITS.charAt( arr[i++] ) ) {
+        }
+
+        return str;
+    }
+
+    if ( baseIn < 37 ) {
+        nStr = nStr.toLowerCase();
+    }
+
+    /*
+     * If non-integer convert integer part and fraction part separately.
+     * Convert the fraction part as if it is an integer than use division to
+     * reduce it down again to a value less than one.
+     */
+    if ( ( e = nStr.indexOf( '.' ) ) > -1 ) {
+
+        /*
+         * Calculate the power to which to raise the base to get the number
+         * to divide the fraction part by after it has been converted as an
+         * integer to the required base.
+         */
+        e = nStr.length - e - 1;
+
+        // Use toFixed to avoid possible exponential notation.
+        dvs = strToArr( new BigNumber(baseIn)['pow'](e)['toF'](), 10 );
+
+        nArr = nStr.split('.');
+
+        // Convert the base of the fraction part (as integer).
+        dvd = strToArr( nArr[1] );
+
+        // Convert the base of the integer part.
+        nArr = strToArr( nArr[0] );
+
+        // Result will be a BigNumber with a value less than 1.
+        fracBN = divide( dvd, dvs, dvd.length - dvs.length, sign, baseOut,
+          // Is least significant digit of integer part an odd number?
+          nArr[nArr.length - 1] & 1 );
+
+        fracArr = fracBN['c'];
+
+        // e can be <= 0  ( if e == 0, fracArr is [0] or [1] ).
+        if ( e = fracBN['e'] ) {
+
+            // Append zeros according to the exponent of the result.
+            for ( ; ++e; fracArr.unshift(0) ) {
+            }
+
+            // Append the fraction part to the converted integer part.
+            nStr = arrToStr(nArr) + '.' + arrToStr(fracArr);
+
+        // fracArr is [1].
+        // Fraction digits rounded up, so increment last digit of integer part.
+        } else if ( fracArr[0] ) {
+
+            if ( nArr[ e = nArr.length - 1 ] < baseOut - 1 ) {
+                ++nArr[e];
+                nStr = arrToStr(nArr);
+            } else {
+                nStr = new BigNumber( arrToStr(nArr),
+                  baseOut )['plus'](ONE)['toS'](baseOut);
+            }
+
+        // fracArr is [0]. No fraction digits.
+        } else {
+            nStr = arrToStr(nArr);
+        }
+    } else {
+
+        // Simple integer. Convert base.
+        nStr = arrToStr( strToArr(nStr) );
+    }
+
+    return nStr;
+}
+
+
+// Perform division in the specified base. Called by div and convert.
+function divide( dvd, dvs, exp, s, base, isOdd ) {
+    var dvsL, dvsT, next, cmp, remI,
+        dvsZ = dvs.slice(),
+        dvdI = dvsL = dvs.length,
+        dvdL = dvd.length,
+        rem = dvd.slice( 0, dvsL ),
+        remL = rem.length,
+        quo = new BigNumber(ONE),
+        qc = quo['c'] = [],
+        qi = 0,
+        dig = DECIMAL_PLACES + ( quo['e'] = exp ) + 1;
+
+    quo['s'] = s;
+    s = dig < 0 ? 0 : dig;
+
+    // Add zeros to make remainder as long as divisor.
+    for ( ; remL++ < dvsL; rem.push(0) ) {
+    }
+
+    // Create version of divisor with leading zero.
+    dvsZ.unshift(0);
+
+    do {
+
+        // 'next' is how many times the divisor goes into the current remainder.
+        for ( next = 0; next < base; next++ ) {
+
+            // Compare divisor and remainder.
+            if ( dvsL != ( remL = rem.length ) ) {
+                cmp = dvsL > remL ? 1 : -1;
+            } else {
+                for ( remI = -1, cmp = 0; ++remI < dvsL; ) {
+
+                    if ( dvs[remI] != rem[remI] ) {
+                        cmp = dvs[remI] > rem[remI] ? 1 : -1;
+                        break;
+                    }
+                }
+            }
+
+            // Subtract divisor from remainder (if divisor < remainder).
+            if ( cmp < 0 ) {
+
+                // Remainder cannot be more than one digit longer than divisor.
+                // Equalise lengths using divisor with extra leading zero?
+                for ( dvsT = remL == dvsL ? dvs : dvsZ; remL; ) {
+
+                    if ( rem[--remL] < dvsT[remL] ) {
+
+                        for ( remI = remL;
+                          remI && !rem[--remI];
+                            rem[remI] = base - 1 ) {
+                        }
+                        --rem[remI];
+                        rem[remL] += base;
+                    }
+                    rem[remL] -= dvsT[remL];
+                }
+                for ( ; !rem[0]; rem.shift() ) {
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Add the 'next' digit to the result array.
+        qc[qi++] = cmp ? next : ++next;
+
+        // Update the remainder.
+        rem[0] && cmp
+          ? ( rem[remL] = dvd[dvdI] || 0 )
+          : ( rem = [ dvd[dvdI] ] );
+
+    } while ( ( dvdI++ < dvdL || rem[0] != null ) && s-- );
+
+    // Leading zero? Do not remove if result is simply zero (qi == 1).
+    if ( !qc[0] && qi != 1 ) {
+
+        // There can't be more than one zero.
+        --quo['e'];
+        qc.shift();
+    }
+
+    // Round?
+    if ( qi > dig ) {
+        rnd( quo, DECIMAL_PLACES, base, isOdd, rem[0] != null );
+    }
+
+    // Overflow?
+    if ( quo['e'] > MAX_EXP ) {
+
+        // Infinity.
+        quo['c'] = quo['e'] = null;
+
+    // Underflow?
+    } else if ( quo['e'] < MIN_EXP ) {
+
+        // Zero.
+        quo['c'] = [quo['e'] = 0];
+    }
+
+    return quo;
+}
+
+
+/*
+ * Return a string representing the value of BigNumber n in normal or
+ * exponential notation rounded to the specified decimal places or
+ * significant digits.
+ * Called by toString, toExponential (exp 1), toFixed, and toPrecision (exp 2).
+ * d is the index (with the value in normal notation) of the digit that may be
+ * rounded up.
+ */
+function format( n, d, exp ) {
+
+    // Initially, i is the number of decimal places required.
+    var i = d - (n = new BigNumber(n))['e'],
+        c = n['c'];
+
+    // +-Infinity or NaN?
+    if ( !c ) {
+        return n['toS']();
+    }
+
+    // Round?
+    if ( c.length > ++d ) {
+        rnd( n, i, 10 );
+    }
+
+    // Recalculate d if toFixed as n['e'] may have changed if value rounded up.
+    i = c[0] == 0 ? i + 1 : exp ? d : n['e'] + i + 1;
+
+    // Append zeros?
+    for ( ; c.length < i; c.push(0) ) {
+    }
+    i = n['e'];
+
+    /*
+     * toPrecision returns exponential notation if the number of significant
+     * digits specified is less than the number of digits necessary to
+     * represent the integer part of the value in normal notation.
+     */
+    return exp == 1 || exp == 2 && ( --d < i || i <= TO_EXP_NEG )
+
+      // Exponential notation.
+      ? ( n['s'] < 0 && c[0] ? '-' : '' ) + ( c.length > 1
+        ? ( c.splice( 1, 0, '.' ), c.join('') )
+        : c[0] ) + ( i < 0 ? 'e' : 'e+' ) + i
+
+      // Normal notation.
+      : n['toS']();
+}
+
+
+// Round if necessary.
+// Called by divide, format, setMode and sqrt.
+function rnd( x, dp, base, isOdd, r ) {
+    var xc = x['c'],
+        isNeg = x['s'] < 0,
+        half = base / 2,
+        i = x['e'] + dp + 1,
+
+        // 'next' is the digit after the digit that may be rounded up.
+        next = xc[i],
+
+        /*
+         * 'more' is whether there are digits after 'next'.
+         * E.g.
+         * 0.005 (e = -3) to be rounded to 0 decimal places (dp = 0) gives i = -2
+         * The 'next' digit is zero, and there ARE 'more' digits after it.
+         * 0.5 (e = -1) dp = 0 gives i = 0
+         * The 'next' digit is 5 and there are no 'more' digits after it.
+         */
+        more = r || i < 0 || xc[i + 1] != null;
+
+    r = ROUNDING_MODE < 4
+      ? ( next != null || more ) &&
+        ( ROUNDING_MODE == 0 ||
+           ROUNDING_MODE == 2 && !isNeg ||
+             ROUNDING_MODE == 3 && isNeg )
+      : next > half || next == half &&
+        ( ROUNDING_MODE == 4 || more ||
+
+          /*
+           * isOdd is used in base conversion and refers to the least significant
+           * digit of the integer part of the value to be converted. The fraction
+           * part is rounded by this method separately from the integer part.
+           */
+          ROUNDING_MODE == 6 && ( xc[i - 1] & 1 || !dp && isOdd ) ||
+            ROUNDING_MODE == 7 && !isNeg ||
+              ROUNDING_MODE == 8 && isNeg );
+
+    if ( i < 1 || !xc[0] ) {
+        xc.length = 0;
+        xc.push(0);
+
+        if ( r ) {
+
+            // 1, 0.1, 0.01, 0.001, 0.0001 etc.
+            xc[0] = 1;
+            x['e'] = -dp;
+        } else {
+
+            // Zero.
+            x['e'] = 0;
+        }
+
+        return x;
+    }
+
+    // Remove any digits after the required decimal places.
+    xc.length = i--;
+
+    // Round up?
+    if ( r ) {
+
+        // Rounding up may mean the previous digit has to be rounded up and so on.
+        for ( --base; ++xc[i] > base; ) {
+            xc[i] = 0;
+
+            if ( !i-- ) {
+                ++x['e'];
+                xc.unshift(1);
+            }
+        }
+    }
+
+    // Remove trailing zeros.
+    for ( i = xc.length; !xc[--i]; xc.pop() ) {
+    }
+
+    return x;
+}
+
+
+// Round after setting the appropriate rounding mode.
+// Handles ceil, floor and round.
+function setMode( x, dp, rm ) {
+    var r = ROUNDING_MODE;
+
+    ROUNDING_MODE = rm;
+    x = new BigNumber(x);
+    x['c'] && rnd( x, dp, 10 );
+    ROUNDING_MODE = r;
+
+    return x;
+}
+
+
+// PROTOTYPE/INSTANCE METHODS
+
+
+/*
+ * Return a new BigNumber whose value is the absolute value of this BigNumber.
+ */
+P['abs'] = P['absoluteValue'] = function () {
+    var x = new BigNumber(this);
+
+    if ( x['s'] < 0 ) {
+        x['s'] = 1;
+    }
+
+    return x;
+};
+
+/*
+ * Return the bit length of the number.
+ */
+P['bitLength'] = function () {
+    return this.toString(2).length;
+};
+
+
+/*
+ * Return a new BigNumber whose value is the value of this BigNumber
+ * rounded to a whole number in the direction of Infinity.
+ */
+P['ceil'] = function () {
+    return setMode( this, 0, 2 );
+};
+
+
+/*
+ * Return
+ * 1 if the value of this BigNumber is greater than the value of BigNumber(y, b),
+ * -1 if the value of this BigNumber is less than the value of BigNumber(y, b),
+ * 0 if they have the same value,
+ * or null if the value of either is NaN.
+ */
+P['comparedTo'] = P['cmp'] = function ( y, b ) {
+    var a,
+        x = this,
+        xc = x['c'],
+        yc = ( id = -id, y = new BigNumber( y, b ) )['c'],
+        i = x['s'],
+        j = y['s'],
+        k = x['e'],
+        l = y['e'];
+
+    // Either NaN?
+    if ( !i || !j ) {
+        return null;
+    }
+
+    a = xc && !xc[0], b = yc && !yc[0];
+
+    // Either zero?
+    if ( a || b ) {
+        return a ? b ? 0 : -j : i;
+    }
+
+    // Signs differ?
+    if ( i != j ) {
+        return i;
+    }
+
+    // Either Infinity?
+    if ( a = i < 0, b = k == l, !xc || !yc ) {
+        return b ? 0 : !xc ^ a ? 1 : -1;
+    }
+
+    // Compare exponents.
+    if ( !b ) {
+        return k > l ^ a ? 1 : -1;
+    }
+
+    // Compare digit by digit.
+    for ( i = -1,
+          j = ( k = xc.length ) < ( l = yc.length ) ? k : l;
+          ++i < j; ) {
+
+        if ( xc[i] != yc[i] ) {
+            return xc[i] > yc[i] ^ a ? 1 : -1;
+        }
+    }
+    // Compare lengths.
+    return k == l ? 0 : k > l ^ a ? 1 : -1;
+};
+
+
+/*
+ *  n / 0 = I
+ *  n / N = N
+ *  n / I = 0
+ *  0 / n = 0
+ *  0 / 0 = N
+ *  0 / N = N
+ *  0 / I = 0
+ *  N / n = N
+ *  N / 0 = N
+ *  N / N = N
+ *  N / I = N
+ *  I / n = I
+ *  I / 0 = I
+ *  I / N = N
+ *  I / I = N
+ *
+ * Return a new BigNumber whose value is the value of this BigNumber
+ * divided by the value of BigNumber(y, b), rounded according to
+ * DECIMAL_PLACES and ROUNDING_MODE.
+ */
+P['dividedBy'] = P['div'] = function ( y, b ) {
+    var xc = this['c'],
+        xe = this['e'],
+        xs = this['s'],
+        yc = ( id = 2, y = new BigNumber( y, b ) )['c'],
+        ye = y['e'],
+        ys = y['s'],
+        s = xs == ys ? 1 : -1;
+
+    // Either NaN/Infinity/0?
+    return !xe && ( !xc || !xc[0] ) || !ye && ( !yc || !yc[0] )
+
+      // Either NaN?
+      ? new BigNumber( !xs || !ys ||
+
+        // Both 0 or both Infinity?
+        ( xc ? yc && xc[0] == yc[0] : !yc )
+
+          // Return NaN.
+          ? NaN
+
+          // x is 0 or y is Infinity?
+          : xc && xc[0] == 0 || !yc
+
+            // Return +-0.
+            ? s * 0
+
+            // y is 0. Return +-Infinity.
+            : s / 0 )
+
+      : divide( xc, yc, xe - ye, s, 10 );
+};
+
+
+/*
+ * Return true if the value of this BigNumber is equal to the value of
+ * BigNumber(n, b), otherwise returns false.
+ */
+P['equals'] = P['eq'] = function ( n, b ) {
+    id = 3;
+    return this['cmp']( n, b ) === 0;
+};
+
+
+/*
+ * Return a new BigNumber whose value is the value of this BigNumber
+ * rounded to a whole number in the direction of -Infinity.
+ */
+P['floor'] = function () {
+    return setMode( this, 0, 3 );
+};
+
+
+/*
+ * Return true if the value of this BigNumber is greater than the value of
+ * BigNumber(n, b), otherwise returns false.
+ */
+P['greaterThan'] = P['gt'] = function ( n, b ) {
+    id = 4;
+    return this['cmp']( n, b ) > 0;
+};
+
+
+/*
+ * Return true if the value of this BigNumber is greater than or equal to
+ * the value of BigNumber(n, b), otherwise returns false.
+ */
+P['greaterThanOrEqualTo'] = P['gte'] = P['gt'] = function ( n, b ) {
+    id = 5;
+    return ( b = this['cmp']( n, b ) ) == 1 || b === 0;
+};
+
+
+/*
+ * Return true if the value of this BigNumber is a finite number, otherwise
+ * returns false.
+ */
+P['isFinite'] = P['isF'] = function () {
+    return !!this['c'];
+};
+
+
+/*
+ * Return true if the value of this BigNumber is NaN, otherwise returns
+ * false.
+ */
+P['isNaN'] = function () {
+    return !this['s'];
+};
+
+
+/*
+ * Return true if the value of this BigNumber is negative, otherwise
+ * returns false.
+ */
+P['isNegative'] = P['isNeg'] = function () {
+    return this['s'] < 0;
+};
+
+
+/*
+ * Return true if the value of this BigNumber is 0 or -0, otherwise returns
+ * false.
+ */
+P['isZero'] = P['isZ'] = function () {
+    return !!this['c'] && this['c'][0] == 0;
+};
+
+
+/*
+ * Return true if the value of this BigNumber is less than the value of
+ * BigNumber(n, b), otherwise returns false.
+ */
+P['lessThan'] = P['lt'] = function ( n, b ) {
+    id = 6;
+    return this['cmp']( n, b ) < 0;
+};
+
+
+/*
+ * Return true if the value of this BigNumber is less than or equal to the
+ * value of BigNumber(n, b), otherwise returns false.
+ */
+P['lessThanOrEqualTo'] = P['lte'] = P['le'] = function ( n, b ) {
+    id = 7;
+    return ( b = this['cmp']( n, b ) ) == -1 || b === 0;
+};
+
+
+/*
+ *  n - 0 = n
+ *  n - N = N
+ *  n - I = -I
+ *  0 - n = -n
+ *  0 - 0 = 0
+ *  0 - N = N
+ *  0 - I = -I
+ *  N - n = N
+ *  N - 0 = N
+ *  N - N = N
+ *  N - I = N
+ *  I - n = I
+ *  I - 0 = I
+ *  I - N = N
+ *  I - I = N
+ *
+ * Return a new BigNumber whose value is the value of this BigNumber minus
+ * the value of BigNumber(y, b).
+ */
+P['minus'] = P['sub'] = function ( y, b ) {
+    var d, i, j, xLTy,
+        x = this,
+        a = x['s'];
+
+    b = ( id = 8, y = new BigNumber( y, b ) )['s'];
+
+    // Either NaN?
+    if ( !a || !b ) {
+        return new BigNumber(NaN);
+    }
+
+    // Signs differ?
+    if ( a != b ) {
+        return y['s'] = -b, x['plus'](y);
+    }
+
+    var xc = x['c'],
+        xe = x['e'],
+        yc = y['c'],
+        ye = y['e'];
+
+    if ( !xe || !ye ) {
+
+        // Either Infinity?
+        if ( !xc || !yc ) {
+            return xc ? ( y['s'] = -b, y ) : new BigNumber( yc ? x : NaN );
+        }
+
+        // Either zero?
+        if ( !xc[0] || !yc[0] ) {
+
+            // y is non-zero?
+            return yc[0]
+              ? ( y['s'] = -b, y )
+
+              // x is non-zero?
+              : new BigNumber( xc[0]
+                ? x
+
+                // Both are zero.
+                // IEEE 754 (2008) 6.3: n - n = -0 when rounding to -Infinity
+                : ROUNDING_MODE == 3 ? -0 : 0 );
+        }
+    }
+
+    // Determine which is the bigger number.
+    // Prepend zeros to equalise exponents.
+    if ( xc = xc.slice(), a = xe - ye ) {
+        d = ( xLTy = a < 0 ) ? ( a = -a, xc ) : ( ye = xe, yc );
+
+        for ( d.reverse(), b = a; b--; d.push(0) ) {
+        }
+        d.reverse();
+    } else {
+
+        // Exponents equal. Check digit by digit.
+        j = ( ( xLTy = xc.length < yc.length ) ? xc : yc ).length;
+
+        for ( a = b = 0; b < j; b++ ) {
+
+            if ( xc[b] != yc[b] ) {
+                xLTy = xc[b] < yc[b];
+                break;
+            }
+        }
+    }
+
+    // x < y? Point xc to the array of the bigger number.
+    if ( xLTy ) {
+        d = xc, xc = yc, yc = d;
+        y['s'] = -y['s'];
+    }
+
+    /*
+     * Append zeros to xc if shorter. No need to add zeros to yc if shorter
+     * as subtraction only needs to start at yc.length.
+     */
+    if ( ( b = -( ( j = xc.length ) - yc.length ) ) > 0 ) {
+
+        for ( ; b--; xc[j++] = 0 ) {
+        }
+    }
+
+    // Subtract yc from xc.
+    for ( b = yc.length; b > a; ){
+
+        if ( xc[--b] < yc[b] ) {
+
+            for ( i = b; i && !xc[--i]; xc[i] = 9 ) {
+            }
+            --xc[i];
+            xc[b] += 10;
+        }
+        xc[b] -= yc[b];
+    }
+
+    // Remove trailing zeros.
+    for ( ; xc[--j] == 0; xc.pop() ) {
+    }
+
+    // Remove leading zeros and adjust exponent accordingly.
+    for ( ; xc[0] == 0; xc.shift(), --ye ) {
+    }
+
+    /*
+     * No need to check for Infinity as +x - +y != Infinity && -x - -y != Infinity
+     * when neither x or y are Infinity.
+     */
+
+    // Underflow?
+    if ( ye < MIN_EXP || !xc[0] ) {
+
+        /*
+         * Following IEEE 754 (2008) 6.3,
+         * n - n = +0  but  n - n = -0 when rounding towards -Infinity.
+         */
+        if ( !xc[0] ) {
+            y['s'] = ROUNDING_MODE == 3 ? -1 : 1;
+        }
+
+        // Result is zero.
+        xc = [ye = 0];
+    }
+
+    return y['c'] = xc, y['e'] = ye, y;
+};
+
+
+/*
+ *   n % 0 =  N
+ *   n % N =  N
+ *   0 % n =  0
+ *  -0 % n = -0
+ *   0 % 0 =  N
+ *   0 % N =  N
+ *   N % n =  N
+ *   N % 0 =  N
+ *   N % N =  N
+ *
+ * Return a new BigNumber whose value is the value of this BigNumber modulo
+ * the value of BigNumber(y, b).
+ */
+P['modulo'] = P['mod'] = function ( y, b ) {
+    var x = this,
+        xc = x['c'],
+        yc = ( id = 9, y = new BigNumber( y, b ) )['c'],
+        i = x['s'],
+        j = y['s'];
+
+    // Is x or y NaN, or y zero?
+    b = !i || !j || yc && !yc[0];
+
+    if ( b || xc && !xc[0] ) {
+        return new BigNumber( b ? NaN : x );
+    }
+
+    x['s'] = y['s'] = 1;
+    b = y['cmp'](x) == 1;
+    x['s'] = i, y['s'] = j;
+
+    return b
+      ? new BigNumber(x)
+      : ( i = DECIMAL_PLACES, j = ROUNDING_MODE,
+        DECIMAL_PLACES = 0, ROUNDING_MODE = 1,
+          x = x['div'](y),
+            DECIMAL_PLACES = i, ROUNDING_MODE = j,
+              this['minus']( x['times'](y) ) );
+};
+
+
+/*
+ * Return a new BigNumber whose value is the value of this BigNumber
+ * negated, i.e. multiplied by -1.
+ */
+P['negated'] = P['neg'] = function () {
+    var x = new BigNumber(this);
+
+    return x['s'] = -x['s'] || null, x;
+};
+
+
+/*
+ *  n + 0 = n
+ *  n + N = N
+ *  n + I = I
+ *  0 + n = n
+ *  0 + 0 = 0
+ *  0 + N = N
+ *  0 + I = I
+ *  N + n = N
+ *  N + 0 = N
+ *  N + N = N
+ *  N + I = N
+ *  I + n = I
+ *  I + 0 = I
+ *  I + N = N
+ *  I + I = I
+ *
+ * Return a new BigNumber whose value is the value of this BigNumber plus
+ * the value of BigNumber(y, b).
+ */
+P['plus'] = P['add'] = function ( y, b ) {
+    var d,
+        x = this,
+        a = x['s'];
+
+    b = ( id = 10, y = new BigNumber( y, b ) )['s'];
+
+    // Either NaN?
+    if ( !a || !b ) {
+        return new BigNumber(NaN);
+    }
+
+    // Signs differ?
+    if ( a != b ) {
+        return y['s'] = -b, x['minus'](y);
+    }
+
+    var xe = x['e'],
+        xc = x['c'],
+        ye = y['e'],
+        yc = y['c'];
+
+    if ( !xe || !ye ) {
+
+        // Either Infinity?
+        if ( !xc || !yc ) {
+
+            // Return +-Infinity.
+            return new BigNumber( a / 0 );
+        }
+
+        // Either zero?
+        if ( !xc[0] || !yc[0] ) {
+
+            // y is non-zero?
+            return yc[0]
+              ? y
+
+              // x is non-zero?
+              : new BigNumber( xc[0]
+                ? x
+
+                // Both are zero. Return zero.
+                : a * 0 );
+        }
+    }
+
+    // Prepend zeros to equalise exponents.
+    // Note: Faster to use reverse then do unshifts.
+    if ( xc = xc.slice(), a = xe - ye ) {
+        d = a > 0 ? ( ye = xe, yc ) : ( a = -a, xc );
+
+        for ( d.reverse(); a--; d.push(0) ) {
+        }
+        d.reverse();
+    }
+
+    // Point xc to the longer array.
+    if ( xc.length - yc.length < 0 ) {
+        d = yc, yc = xc, xc = d;
+    }
+
+    /*
+     * Only start adding at yc.length - 1 as the
+     * further digits of xc can be left as they are.
+     */
+    for ( a = yc.length, b = 0; a;
+         b = ( xc[--a] = xc[a] + yc[a] + b ) / 10 ^ 0, xc[a] %= 10 ) {
+    }
+
+    // No need to check for zero, as +x + +y != 0 && -x + -y != 0
+
+    if ( b ) {
+        xc.unshift(b);
+
+        // Overflow? (MAX_EXP + 1 possible)
+        if ( ++ye > MAX_EXP ) {
+
+            // Infinity.
+            xc = ye = null;
+        }
+    }
+
+     // Remove trailing zeros.
+    for ( a = xc.length; xc[--a] == 0; xc.pop() ) {
+    }
+
+    return y['c'] = xc, y['e'] = ye, y;
+};
+
+
+/*
+ * Return a BigNumber whose value is the value of this BigNumber raised to
+ * the power e. If e is negative round according to DECIMAL_PLACES and
+ * ROUNDING_MODE.
+ *
+ * e {number} Integer, -MAX_POWER to MAX_POWER inclusive.
+ */
+P['toPower'] = P['pow'] = function ( e ) {
+
+    // e to integer, avoiding NaN or Infinity becoming 0.
+    var i = e * 0 == 0 ? e | 0 : e,
+        x = new BigNumber(this),
+        y = new BigNumber(ONE);
+
+    // Use Math.pow?
+    // Pass +-Infinity for out of range exponents.
+    if ( ( ( ( outOfRange = e < -MAX_POWER || e > MAX_POWER ) &&
+      (i = e * 1 / 0) ) ||
+
+         /*
+          * Any exponent that fails the parse becomes NaN.
+          *
+          * Include 'e !== 0' because on Opera -0 == parseFloat(-0) is false,
+          * despite -0 === parseFloat(-0) && -0 == parseFloat('-0') is true.
+          */
+         parse(e) != e && e !== 0 && !(i = NaN) ) &&
+
+          // 'pow() exponent not an integer: {e}'
+          // 'pow() exponent out of range: {e}'
+          !ifExceptionsThrow( e, 'exponent', 'pow' ) ||
+
+            // Pass zero to Math.pow, as any value to the power zero is 1.
+            !i ) {
+
+        // i is +-Infinity, NaN or 0.
+        return new BigNumber( Math.pow( x['toS'](), i ) );
+    }
+
+    for ( i = i < 0 ? -i : i; ; ) {
+
+        if ( i & 1 ) {
+            y = y['times'](x);
+        }
+        i >>= 1;
+
+        if ( !i ) {
+            break;
+        }
+        x = x['times'](x);
+    }
+
+    return e < 0 ? ONE['div'](y) : y;
+};
+
+
+/*
+ * Return a BigNumber whose value is the value of this BigNumber raised to
+ * the power m modulo n.
+ *
+ * m {BigNumber} the value to take the power of
+ * n {BigNumber} the value to modulo by
+ */
+P['powm'] = function ( m, n ) {
+    return this.pow(m).mod(n);
+};
+
+
+/*
+ * Return a new BigNumber whose value is the value of this BigNumber
+ * rounded to a maximum of dp decimal places using rounding mode rm, or to
+ * 0 and ROUNDING_MODE respectively if omitted.
+ *
+ * [dp] {number} Integer, 0 to MAX inclusive.
+ * [rm] {number} Integer, 0 to 8 inclusive.
+ */
+P['round'] = function ( dp, rm ) {
+
+    dp = dp == null || ( ( ( outOfRange = dp < 0 || dp > MAX ) ||
+      parse(dp) != dp ) &&
+
+        // 'round() decimal places out of range: {dp}'
+        // 'round() decimal places not an integer: {dp}'
+        !ifExceptionsThrow( dp, 'decimal places', 'round' ) )
+          ? 0
+          : dp | 0;
+
+    rm = rm == null || ( ( ( outOfRange = rm < 0 || rm > 8 ) ||
+
+      // Include '&& rm !== 0' because with Opera -0 == parseFloat(-0) is false.
+      parse(rm) != rm && rm !== 0 ) &&
+
+        // 'round() mode not an integer: {rm}'
+        // 'round() mode out of range: {rm}'
+        !ifExceptionsThrow( rm, 'mode', 'round' ) )
+          ? ROUNDING_MODE
+          : rm | 0;
+
+    return setMode( this, dp, rm );
+};
+
+
+/*
+ *  sqrt(-n) =  N
+ *  sqrt( N) =  N
+ *  sqrt(-I) =  N
+ *  sqrt( I) =  I
+ *  sqrt( 0) =  0
+ *  sqrt(-0) = -0
+ *
+ * Return a new BigNumber whose value is the square root of the value of
+ * this BigNumber, rounded according to DECIMAL_PLACES and ROUNDING_MODE.
+ */
+P['squareRoot'] = P['sqrt'] = function () {
+    var n, r, re, t,
+        x = this,
+        c = x['c'],
+        s = x['s'],
+        e = x['e'],
+        dp = DECIMAL_PLACES,
+        rm = ROUNDING_MODE,
+        half = new BigNumber('0.5');
+
+    // Negative/NaN/Infinity/zero?
+    if ( s !== 1 || !c || !c[0] ) {
+
+        return new BigNumber( !s || s < 0 && ( !c || c[0] )
+          ? NaN
+          : c ? x : 1 / 0 );
+    }
+
+    // Initial estimate.
+    s = Math.sqrt( x['toS']() );
+    ROUNDING_MODE = 1;
+
+    /*
+      Math.sqrt underflow/overflow?
+      Pass x to Math.sqrt as integer, then adjust the exponent of the result.
+     */
+    if ( s == 0 || s == 1 / 0 ) {
+        n = c.join('');
+
+        if ( !( n.length + e & 1 ) ) {
+            n += '0';
+        }
+        r = new BigNumber( Math.sqrt(n) + '' );
+
+        // r may still not be finite.
+        if ( !r['c'] ) {
+            r['c'] = [1];
+        }
+        r['e'] = ( ( ( e + 1 ) / 2 ) | 0 ) - ( e < 0 || e & 1 );
+    } else {
+        r = new BigNumber( n = s.toString() );
+    }
+    re = r['e'];
+    s = re + ( DECIMAL_PLACES += 4 );
+
+    if ( s < 3 ) {
+        s = 0;
+    }
+    e = s;
+
+    // Newton-Raphson iteration.
+    for ( ; ; ) {
+        t = r;
+        r = half['times']( t['plus']( x['div'](t) ) );
+
+        if ( t['c'].slice( 0, s ).join('') === r['c'].slice( 0, s ).join('') ) {
+            c = r['c'];
+
+            /*
+              The exponent of r may here be one less than the final result
+              exponent (re), e.g 0.0009999 (e-4) --> 0.001 (e-3), so adjust
+              s so the rounding digits are indexed correctly.
+             */
+            s = s - ( n && r['e'] < re );
+
+            /*
+              The 4th rounding digit may be in error by -1 so if the 4 rounding
+              digits are 9999 or 4999 (i.e. approaching a rounding boundary)
+              continue the iteration.
+             */
+            if ( c[s] == 9 && c[s - 1] == 9 && c[s - 2] == 9 &&
+                    ( c[s - 3] == 9 || n && c[s - 3] == 4 ) ) {
+
+                /*
+                  If 9999 on first run through, check to see if rounding up
+                  gives the exact result as the nines may infinitely repeat.
+                 */
+                if ( n && c[s - 3] == 9 ) {
+                    t = r['round']( dp, 0 );
+
+                    if ( t['times'](t)['eq'](x) ) {
+                        ROUNDING_MODE = rm;
+                        DECIMAL_PLACES = dp;
+
+                        return t;
+                    }
+                }
+                DECIMAL_PLACES += 4;
+                s += 4;
+                n = '';
+            } else {
+
+                /*
+                  If the rounding digits are null, 0000 or 5000, check for an
+                  exact result. If not, then there are further digits so
+                  increment the 1st rounding digit to ensure correct rounding.
+                 */
+                if ( !c[e] && !c[e - 1] && !c[e - 2] &&
+                        ( !c[e - 3] || c[e - 3] == 5 ) ) {
+
+                    // Truncate to the first rounding digit.
+                    if ( c.length > e - 2 ) {
+                        c.length = e - 2;
+                    }
+
+                    if ( !r['times'](r)['eq'](x) ) {
+
+                        while ( c.length < e - 3 ) {
+                            c.push(0);
+                        }
+                        c[e - 3]++;
+                    }
+                }
+                ROUNDING_MODE = rm;
+                rnd( r, DECIMAL_PLACES = dp, 10 );
+
+                return r;
+            }
+        }
+    }
+};
+
+
+/*
+ *  n * 0 = 0
+ *  n * N = N
+ *  n * I = I
+ *  0 * n = 0
+ *  0 * 0 = 0
+ *  0 * N = N
+ *  0 * I = N
+ *  N * n = N
+ *  N * 0 = N
+ *  N * N = N
+ *  N * I = N
+ *  I * n = I
+ *  I * 0 = N
+ *  I * N = N
+ *  I * I = I
+ *
+ * Return a new BigNumber whose value is the value of this BigNumber times
+ * the value of BigNumber(y, b).
+ */
+P['times'] = P['mul'] = function ( y, b ) {
+    var c,
+        x = this,
+        xc = x['c'],
+        yc = ( id = 11, y = new BigNumber( y, b ) )['c'],
+        i = x['e'],
+        j = y['e'],
+        a = x['s'];
+
+    y['s'] = a == ( b = y['s'] ) ? 1 : -1;
+
+    // Either NaN/Infinity/0?
+    if ( !i && ( !xc || !xc[0] ) || !j && ( !yc || !yc[0] ) ) {
+
+        // Either NaN?
+        return new BigNumber( !a || !b ||
+
+          // x is 0 and y is Infinity  or  y is 0 and x is Infinity?
+          xc && !xc[0] && !yc || yc && !yc[0] && !xc
+
+            // Return NaN.
+            ? NaN
+
+            // Either Infinity?
+            : !xc || !yc
+
+              // Return +-Infinity.
+              ? y['s'] / 0
+
+              // x or y is 0. Return +-0.
+              : y['s'] * 0 );
+    }
+    y['e'] = i + j;
+
+    if ( ( a = xc.length ) < ( b = yc.length ) ) {
+        c = xc, xc = yc, yc = c, j = a, a = b, b = j;
+    }
+
+    for ( j = a + b, c = []; j--; c.push(0) ) {
+    }
+
+    // Multiply!
+    for ( i = b - 1; i > -1; i-- ) {
+
+        for ( b = 0, j = a + i;
+              j > i;
+              b = c[j] + yc[i] * xc[j - i - 1] + b,
+              c[j--] = b % 10 | 0,
+              b = b / 10 | 0 ) {
+        }
+
+        if ( b ) {
+            c[j] = ( c[j] + b ) % 10;
+        }
+    }
+
+    b && ++y['e'];
+
+    // Remove any leading zero.
+    !c[0] && c.shift();
+
+    // Remove trailing zeros.
+    for ( j = c.length; !c[--j]; c.pop() ) {
+    }
+
+    // No zero check needed as only x * 0 == 0 etc.
+
+    // Overflow?
+    y['c'] = y['e'] > MAX_EXP
+
+      // Infinity.
+      ? ( y['e'] = null )
+
+      // Underflow?
+      : y['e'] < MIN_EXP
+
+        // Zero.
+        ? [ y['e'] = 0 ]
+
+        // Neither.
+        : c;
+
+    return y;
+};
+
+/*
+ * Return a buffer containing the 
+ */
+P['toBuffer'] = function ( opts ) {
+
+    if (typeof opts === 'string') {
+        if (opts !== 'mpint') return 'Unsupported Buffer representation';
+
+        var abs = this.abs();
+        var buf = abs.toBuffer({ size : 1, endian : 'big' });
+        var len = buf.length === 1 && buf[0] === 0 ? 0 : buf.length;
+        if (buf[0] & 0x80) len ++;
+
+        var ret = new Buffer(4 + len);
+        if (len > 0) buf.copy(ret, 4 + (buf[0] & 0x80 ? 1 : 0));
+        if (buf[0] & 0x80) ret[4] = 0;
+
+        ret[0] = len & (0xff << 24);
+        ret[1] = len & (0xff << 16);
+        ret[2] = len & (0xff << 8);
+        ret[3] = len & (0xff << 0);
+
+        // two's compliment for negative integers:
+        var isNeg = this.lt(0);
+        if (isNeg) {
+            for (var i = 4; i < ret.length; i++) {
+                ret[i] = 0xff - ret[i];
+            }
+        }
+        ret[4] = (ret[4] & 0x7f) | (isNeg ? 0x80 : 0);
+        if (isNeg) ret[ret.length - 1] ++;
+
+        return ret;
+    }
+
+    if (!opts) opts = {};
+
+    var endian = { 1 : 'big', '-1' : 'little' }[opts.endian]
+        || opts.endian || 'big'
+    ;
+
+    var hex = this.toString(16);
+    if (hex.charAt(0) === '-') throw new Error(
+        'converting negative numbers to Buffers not supported yet'
+    );
+
+    var size = opts.size === 'auto' ? Math.ceil(hex.length / 2) : (opts.size || 1);
+
+    var len = Math.ceil(hex.length / (2 * size)) * size;
+    var buf = new Buffer(len);
+
+    // zero-pad the hex string so the chunks are all `size` long
+    while (hex.length < 2 * len) hex = '0' + hex;
+
+    var hx = hex
+        .split(new RegExp('(.{' + (2 * size) + '})'))
+        .filter(function (s) { return s.length > 0 })
+    ;
+
+    hx.forEach(function (chunk, i) {
+        for (var j = 0; j < size; j++) {
+            var ix = i * size + (endian === 'big' ? j : size - j - 1);
+            buf[ix] = parseInt(chunk.slice(j*2,j*2+2), 16);
+        }
+    });
+
+    return buf;
+};
+
+/*
+ * Return a string representing the value of this BigNumber in exponential
+ * notation to dp fixed decimal places and rounded using ROUNDING_MODE if
+ * necessary.
+ *
+ * [dp] {number} Integer, 0 to MAX inclusive.
+ */
+P['toExponential'] = P['toE'] = function ( dp ) {
+
+    return format( this,
+      ( dp == null || ( ( outOfRange = dp < 0 || dp > MAX ) ||
+
+        /*
+         * Include '&& dp !== 0' because with Opera -0 == parseFloat(-0) is
+         * false, despite -0 == parseFloat('-0') && 0 == -0 being true.
+         */
+        parse(dp) != dp && dp !== 0 ) &&
+
+          // 'toE() decimal places not an integer: {dp}'
+          // 'toE() decimal places out of range: {dp}'
+          !ifExceptionsThrow( dp, 'decimal places', 'toE' ) ) && this['c']
+            ? this['c'].length - 1
+            : dp | 0, 1 );
+};
+
+
+/*
+ * Return a string representing the value of this BigNumber in normal
+ * notation to dp fixed decimal places and rounded using ROUNDING_MODE if
+ * necessary.
+ *
+ * Note: as with JavaScript's number type, (-0).toFixed(0) is '0',
+ * but e.g. (-0.00001).toFixed(0) is '-0'.
+ *
+ * [dp] {number} Integer, 0 to MAX inclusive.
+ */
+P['toFixed'] = P['toF'] = function ( dp ) {
+    var n, str, d,
+        x = this;
+
+    if ( !( dp == null || ( ( outOfRange = dp < 0 || dp > MAX ) ||
+        parse(dp) != dp && dp !== 0 ) &&
+
+        // 'toF() decimal places not an integer: {dp}'
+        // 'toF() decimal places out of range: {dp}'
+        !ifExceptionsThrow( dp, 'decimal places', 'toF' ) ) ) {
+          d = x['e'] + ( dp | 0 );
+    }
+
+    n = TO_EXP_NEG, dp = TO_EXP_POS;
+    TO_EXP_NEG = -( TO_EXP_POS = 1 / 0 );
+
+    // Note: str is initially undefined.
+    if ( d == str ) {
+        str = x['toS']();
+    } else {
+        str = format( x, d );
+
+        // (-0).toFixed() is '0', but (-0.1).toFixed() is '-0'.
+        // (-0).toFixed(1) is '0.0', but (-0.01).toFixed(1) is '-0.0'.
+        if ( x['s'] < 0 && x['c'] ) {
+
+            // As e.g. -0 toFixed(3), will wrongly be returned as -0.000 from toString.
+            if ( !x['c'][0] ) {
+                str = str.replace(/^-/, '');
+
+            // As e.g. -0.5 if rounded to -0 will cause toString to omit the minus sign.
+            } else if ( str.indexOf('-') < 0 ) {
+                str = '-' + str;
+            }
+        }
+    }
+    TO_EXP_NEG = n, TO_EXP_POS = dp;
+
+    return str;
+};
+
+
+/*
+ * Return a string array representing the value of this BigNumber as a
+ * simple fraction with an integer numerator and an integer denominator.
+ * The denominator will be a positive non-zero value less than or equal to
+ * the specified maximum denominator. If a maximum denominator is not
+ * specified, the denominator will be the lowest value necessary to
+ * represent the number exactly.
+ *
+ * [maxD] {number|string|BigNumber} Integer >= 1 and < Infinity.
+ */
+P['toFraction'] = P['toFr'] = function ( maxD ) {
+    var q, frac, n0, d0, d2, n, e,
+        n1 = d0 = new BigNumber(ONE),
+        d1 = n0 = new BigNumber('0'),
+        x = this,
+        xc = x['c'],
+        exp = MAX_EXP,
+        dp = DECIMAL_PLACES,
+        rm = ROUNDING_MODE,
+        d = new BigNumber(ONE);
+
+    // NaN, Infinity.
+    if ( !xc ) {
+        return x['toS']();
+    }
+
+    e = d['e'] = xc.length - x['e'] - 1;
+
+    // If max denominator is undefined or null...
+    if ( maxD == null ||
+
+         // or NaN...
+         ( !( id = 12, n = new BigNumber(maxD) )['s'] ||
+
+           // or less than 1, or Infinity...
+           ( outOfRange = n['cmp'](n1) < 0 || !n['c'] ) ||
+
+             // or not an integer...
+             ( ERRORS && n['e'] < n['c'].length - 1 ) ) &&
+
+               // 'toFr() max denominator not an integer: {maxD}'
+               // 'toFr() max denominator out of range: {maxD}'
+               !ifExceptionsThrow( maxD, 'max denominator', 'toFr' ) ||
+
+                 // or greater than the maxD needed to specify the value exactly...
+                 ( maxD = n )['cmp'](d) > 0 ) {
+
+        // d is e.g. 10, 100, 1000, 10000... , n1 is 1.
+        maxD = e > 0 ? d : n1;
+    }
+
+    MAX_EXP = 1 / 0;
+    n = new BigNumber( xc.join('') );
+
+    for ( DECIMAL_PLACES = 0, ROUNDING_MODE = 1; ; )  {
+        q = n['div'](d);
+        d2 = d0['plus']( q['times'](d1) );
+
+        if ( d2['cmp'](maxD) == 1 ) {
+            break;
+        }
+
+        d0 = d1, d1 = d2;
+
+        n1 = n0['plus']( q['times']( d2 = n1 ) );
+        n0 = d2;
+
+        d = n['minus']( q['times']( d2 = d ) );
+        n = d2;
+    }
+
+    d2 = maxD['minus'](d0)['div'](d1);
+    n0 = n0['plus']( d2['times'](n1) );
+    d0 = d0['plus']( d2['times'](d1) );
+
+    n0['s'] = n1['s'] = x['s'];
+
+    DECIMAL_PLACES = e * 2;
+    ROUNDING_MODE = rm;
+
+    // Determine which fraction is closer to x, n0 / d0 or n1 / d1?
+    frac = n1['div'](d1)['minus'](x)['abs']()['cmp'](
+      n0['div'](d0)['minus'](x)['abs']() ) < 1
+      ? [ n1['toS'](), d1['toS']() ]
+      : [ n0['toS'](), d0['toS']() ];
+
+    return MAX_EXP = exp, DECIMAL_PLACES = dp, frac;
+};
+
+
+/*
+ * Return a string representing the value of this BigNumber to sd significant
+ * digits and rounded using ROUNDING_MODE if necessary.
+ * If sd is less than the number of digits necessary to represent the integer
+ * part of the value in normal notation, then use exponential notation.
+ *
+ * sd {number} Integer, 1 to MAX inclusive.
+ */
+P['toPrecision'] = P['toP'] = function ( sd ) {
+
+    /*
+     * ERRORS true: Throw if sd not undefined, null or an integer in range.
+     * ERRORS false: Ignore sd if not a number or not in range.
+     * Truncate non-integers.
+     */
+    return sd == null || ( ( ( outOfRange = sd < 1 || sd > MAX ) ||
+      parse(sd) != sd ) &&
+
+        // 'toP() precision not an integer: {sd}'
+        // 'toP() precision out of range: {sd}'
+        !ifExceptionsThrow( sd, 'precision', 'toP' ) )
+          ? this['toS']()
+          : format( this, --sd | 0, 2 );
+};
+
+
+/*
+ * Return a string representing the value of this BigNumber in base b, or
+ * base 10 if b is omitted. If a base is specified, including base 10,
+ * round according to DECIMAL_PLACES and ROUNDING_MODE.
+ * If a base is not specified, and this BigNumber has a positive exponent
+ * that is equal to or greater than TO_EXP_POS, or a negative exponent equal
+ * to or less than TO_EXP_NEG, return exponential notation.
+ *
+ * [b] {number} Integer, 2 to 64 inclusive.
+ */
+P['toString'] = P['toS'] = function ( b ) {
+    var u, str, strL,
+        x = this,
+        xe = x['e'];
+
+    // Infinity or NaN?
+    if ( xe === null ) {
+        str = x['s'] ? 'Infinity' : 'NaN';
+
+    // Exponential format?
+    } else if ( b === u && ( xe <= TO_EXP_NEG || xe >= TO_EXP_POS ) ) {
+        return format( x, x['c'].length - 1, 1 );
+    } else {
+        str = x['c'].join('');
+
+        // Negative exponent?
+        if ( xe < 0 ) {
+
+            // Prepend zeros.
+            for ( ; ++xe; str = '0' + str ) {
+            }
+            str = '0.' + str;
+
+        // Positive exponent?
+        } else if ( strL = str.length, xe > 0 ) {
+
+            if ( ++xe > strL ) {
+
+                // Append zeros.
+                for ( xe -= strL; xe-- ; str += '0' ) {
+                }
+            } else if ( xe < strL ) {
+                str = str.slice( 0, xe ) + '.' + str.slice(xe);
+            }
+
+        // Exponent zero.
+        } else {
+            if ( u = str.charAt(0), strL > 1 ) {
+                str = u + '.' + str.slice(1);
+
+            // Avoid '-0'
+            } else if ( u == '0' ) {
+                return u;
+            }
+        }
+
+        if ( b != null ) {
+
+            if ( !( outOfRange = !( b >= 2 && b < 65 ) ) &&
+              ( b == (b | 0) || !ERRORS ) ) {
+                str = convert( str, b | 0, 10, x['s'] );
+
+                // Avoid '-0'
+                if ( str == '0' ) {
+                    return str;
+                }
+            } else {
+
+                // 'toS() base not an integer: {b}'
+                // 'toS() base out of range: {b}'
+                ifExceptionsThrow( b, 'base', 'toS' );
+            }
+        }
+
+    }
+
+    return x['s'] < 0 ? '-' + str : str;
+};
+
+
+/*
+ * Return as toString, but do not accept a base argument.
+ */
+P['valueOf'] = function () {
+    return this['toS']();
+};
+
+
+// Add aliases for BigDecimal methods.
+//P['add'] = P['plus'];
+//P['subtract'] = P['minus'];
+//P['multiply'] = P['times'];
+//P['divide'] = P['div'];
+//P['remainder'] = P['mod'];
+//P['compareTo'] = P['cmp'];
+//P['negate'] = P['neg'];
+
+
+// EXPORT
+module.exports = BigNumber;
+
+}).call(this)}).call(this,require("buffer").Buffer)
+},{"buffer":4}],4:[function(require,module,exports){
 /*!
  * The buffer module from node.js, for the browser.
  *
@@ -288,10 +2403,6 @@ function fromByteArray (uint8) {
 
 var base64 = require('base64-js')
 var ieee754 = require('ieee754')
-var customInspectSymbol =
-  (typeof Symbol === 'function' && typeof Symbol.for === 'function')
-    ? Symbol.for('nodejs.util.inspect.custom')
-    : null
 
 exports.Buffer = Buffer
 exports.SlowBuffer = SlowBuffer
@@ -328,9 +2439,7 @@ function typedArraySupport () {
   // Can typed array instances can be augmented?
   try {
     var arr = new Uint8Array(1)
-    var proto = { foo: function () { return 42 } }
-    Object.setPrototypeOf(proto, Uint8Array.prototype)
-    Object.setPrototypeOf(arr, proto)
+    arr.__proto__ = { __proto__: Uint8Array.prototype, foo: function () { return 42 } }
     return arr.foo() === 42
   } catch (e) {
     return false
@@ -359,7 +2468,7 @@ function createBuffer (length) {
   }
   // Return an augmented `Uint8Array` instance
   var buf = new Uint8Array(length)
-  Object.setPrototypeOf(buf, Buffer.prototype)
+  buf.__proto__ = Buffer.prototype
   return buf
 }
 
@@ -409,7 +2518,7 @@ function from (value, encodingOrOffset, length) {
   }
 
   if (value == null) {
-    throw new TypeError(
+    throw TypeError(
       'The first argument must be one of type string, Buffer, ArrayBuffer, Array, ' +
       'or Array-like Object. Received type ' + (typeof value)
     )
@@ -461,8 +2570,8 @@ Buffer.from = function (value, encodingOrOffset, length) {
 
 // Note: Change prototype *after* Buffer.from is defined to workaround Chrome bug:
 // https://github.com/feross/buffer/pull/148
-Object.setPrototypeOf(Buffer.prototype, Uint8Array.prototype)
-Object.setPrototypeOf(Buffer, Uint8Array)
+Buffer.prototype.__proto__ = Uint8Array.prototype
+Buffer.__proto__ = Uint8Array
 
 function assertSize (size) {
   if (typeof size !== 'number') {
@@ -566,8 +2675,7 @@ function fromArrayBuffer (array, byteOffset, length) {
   }
 
   // Return an augmented `Uint8Array` instance
-  Object.setPrototypeOf(buf, Buffer.prototype)
-
+  buf.__proto__ = Buffer.prototype
   return buf
 }
 
@@ -889,9 +2997,6 @@ Buffer.prototype.inspect = function inspect () {
   if (this.length > max) str += ' ... '
   return '<Buffer ' + str + '>'
 }
-if (customInspectSymbol) {
-  Buffer.prototype[customInspectSymbol] = Buffer.prototype.inspect
-}
 
 Buffer.prototype.compare = function compare (target, start, end, thisStart, thisEnd) {
   if (isInstance(target, Uint8Array)) {
@@ -1017,7 +3122,7 @@ function bidirectionalIndexOf (buffer, val, byteOffset, encoding, dir) {
         return Uint8Array.prototype.lastIndexOf.call(buffer, val, byteOffset)
       }
     }
-    return arrayIndexOf(buffer, [val], byteOffset, encoding, dir)
+    return arrayIndexOf(buffer, [ val ], byteOffset, encoding, dir)
   }
 
   throw new TypeError('val must be string, number or Buffer')
@@ -1346,7 +3451,7 @@ function hexSlice (buf, start, end) {
 
   var out = ''
   for (var i = start; i < end; ++i) {
-    out += hexSliceLookupTable[buf[i]]
+    out += toHex(buf[i])
   }
   return out
 }
@@ -1383,8 +3488,7 @@ Buffer.prototype.slice = function slice (start, end) {
 
   var newBuf = this.subarray(start, end)
   // Return an augmented `Uint8Array` instance
-  Object.setPrototypeOf(newBuf, Buffer.prototype)
-
+  newBuf.__proto__ = Buffer.prototype
   return newBuf
 }
 
@@ -1873,8 +3977,6 @@ Buffer.prototype.fill = function fill (val, start, end, encoding) {
     }
   } else if (typeof val === 'number') {
     val = val & 255
-  } else if (typeof val === 'boolean') {
-    val = Number(val)
   }
 
   // Invalid ranges are not set to a default, so can range check early.
@@ -1930,6 +4032,11 @@ function base64clean (str) {
     str = str + '='
   }
   return str
+}
+
+function toHex (n) {
+  if (n < 16) return '0' + n.toString(16)
+  return n.toString(16)
 }
 
 function utf8ToBytes (string, units) {
@@ -2062,22 +4169,962 @@ function numberIsNaN (obj) {
   return obj !== obj // eslint-disable-line no-self-compare
 }
 
-// Create lookup table for `toString('hex')`
-// See: https://github.com/feross/buffer/issues/219
-var hexSliceLookupTable = (function () {
-  var alphabet = '0123456789abcdef'
-  var table = new Array(256)
-  for (var i = 0; i < 16; ++i) {
-    var i16 = i * 16
-    for (var j = 0; j < 16; ++j) {
-      table[i16 + j] = alphabet[i] + alphabet[j]
+},{"base64-js":2,"ieee754":31}],5:[function(require,module,exports){
+/*
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2014 Patrick Gansterer <paroga@paroga.com>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+(function(global, undefined) { "use strict";
+var POW_2_24 = Math.pow(2, -24),
+    POW_2_32 = Math.pow(2, 32),
+    POW_2_53 = Math.pow(2, 53);
+
+function encode(value) {
+  var data = new ArrayBuffer(256);
+  var dataView = new DataView(data);
+  var lastLength;
+  var offset = 0;
+
+  function ensureSpace(length) {
+    var newByteLength = data.byteLength;
+    var requiredLength = offset + length;
+    while (newByteLength < requiredLength)
+      newByteLength *= 2;
+    if (newByteLength !== data.byteLength) {
+      var oldDataView = dataView;
+      data = new ArrayBuffer(newByteLength);
+      dataView = new DataView(data);
+      var uint32count = (offset + 3) >> 2;
+      for (var i = 0; i < uint32count; ++i)
+        dataView.setUint32(i * 4, oldDataView.getUint32(i * 4));
+    }
+
+    lastLength = length;
+    return dataView;
+  }
+  function write() {
+    offset += lastLength;
+  }
+  function writeFloat64(value) {
+    write(ensureSpace(8).setFloat64(offset, value));
+  }
+  function writeUint8(value) {
+    write(ensureSpace(1).setUint8(offset, value));
+  }
+  function writeUint8Array(value) {
+    var dataView = ensureSpace(value.length);
+    for (var i = 0; i < value.length; ++i)
+      dataView.setUint8(offset + i, value[i]);
+    write();
+  }
+  function writeUint16(value) {
+    write(ensureSpace(2).setUint16(offset, value));
+  }
+  function writeUint32(value) {
+    write(ensureSpace(4).setUint32(offset, value));
+  }
+  function writeUint64(value) {
+    var low = value % POW_2_32;
+    var high = (value - low) / POW_2_32;
+    var dataView = ensureSpace(8);
+    dataView.setUint32(offset, high);
+    dataView.setUint32(offset + 4, low);
+    write();
+  }
+  function writeTypeAndLength(type, length) {
+    if (length < 24) {
+      writeUint8(type << 5 | length);
+    } else if (length < 0x100) {
+      writeUint8(type << 5 | 24);
+      writeUint8(length);
+    } else if (length < 0x10000) {
+      writeUint8(type << 5 | 25);
+      writeUint16(length);
+    } else if (length < 0x100000000) {
+      writeUint8(type << 5 | 26);
+      writeUint32(length);
+    } else {
+      writeUint8(type << 5 | 27);
+      writeUint64(length);
     }
   }
-  return table
-})()
+  
+  function encodeItem(value) {
+    var i;
 
-}).call(this,require("buffer").Buffer)
-},{"base64-js":2,"buffer":3,"ieee754":4}],4:[function(require,module,exports){
+    if (value === false)
+      return writeUint8(0xf4);
+    if (value === true)
+      return writeUint8(0xf5);
+    if (value === null)
+      return writeUint8(0xf6);
+    if (value === undefined)
+      return writeUint8(0xf7);
+  
+    switch (typeof value) {
+      case "number":
+        if (Math.floor(value) === value) {
+          if (0 <= value && value <= POW_2_53)
+            return writeTypeAndLength(0, value);
+          if (-POW_2_53 <= value && value < 0)
+            return writeTypeAndLength(1, -(value + 1));
+        }
+        writeUint8(0xfb);
+        return writeFloat64(value);
+
+      case "string":
+        var utf8data = [];
+        for (i = 0; i < value.length; ++i) {
+          var charCode = value.charCodeAt(i);
+          if (charCode < 0x80) {
+            utf8data.push(charCode);
+          } else if (charCode < 0x800) {
+            utf8data.push(0xc0 | charCode >> 6);
+            utf8data.push(0x80 | charCode & 0x3f);
+          } else if (charCode < 0xd800) {
+            utf8data.push(0xe0 | charCode >> 12);
+            utf8data.push(0x80 | (charCode >> 6)  & 0x3f);
+            utf8data.push(0x80 | charCode & 0x3f);
+          } else {
+            charCode = (charCode & 0x3ff) << 10;
+            charCode |= value.charCodeAt(++i) & 0x3ff;
+            charCode += 0x10000;
+
+            utf8data.push(0xf0 | charCode >> 18);
+            utf8data.push(0x80 | (charCode >> 12)  & 0x3f);
+            utf8data.push(0x80 | (charCode >> 6)  & 0x3f);
+            utf8data.push(0x80 | charCode & 0x3f);
+          }
+        }
+
+        writeTypeAndLength(3, utf8data.length);
+        return writeUint8Array(utf8data);
+
+      default:
+        var length;
+        if (Array.isArray(value)) {
+          length = value.length;
+          writeTypeAndLength(4, length);
+          for (i = 0; i < length; ++i)
+            encodeItem(value[i]);
+        } else if (value instanceof Uint8Array) {
+          writeTypeAndLength(2, value.length);
+          writeUint8Array(value);
+        } else {
+          var keys = Object.keys(value);
+          length = keys.length;
+          writeTypeAndLength(5, length);
+          for (i = 0; i < length; ++i) {
+            var key = keys[i];
+            encodeItem(key);
+            encodeItem(value[key]);
+          }
+        }
+    }
+  }
+  
+  encodeItem(value);
+
+  if ("slice" in data)
+    return data.slice(0, offset);
+  
+  var ret = new ArrayBuffer(offset);
+  var retView = new DataView(ret);
+  for (var i = 0; i < offset; ++i)
+    retView.setUint8(i, dataView.getUint8(i));
+  return ret;
+}
+
+function decode(data, tagger, simpleValue) {
+  var dataView = new DataView(data);
+  var offset = 0;
+  
+  if (typeof tagger !== "function")
+    tagger = function(value) { return value; };
+  if (typeof simpleValue !== "function")
+    simpleValue = function() { return undefined; };
+
+  function read(value, length) {
+    offset += length;
+    return value;
+  }
+  function readArrayBuffer(length) {
+    return read(new Uint8Array(data, offset, length), length);
+  }
+  function readFloat16() {
+    var tempArrayBuffer = new ArrayBuffer(4);
+    var tempDataView = new DataView(tempArrayBuffer);
+    var value = readUint16();
+
+    var sign = value & 0x8000;
+    var exponent = value & 0x7c00;
+    var fraction = value & 0x03ff;
+    
+    if (exponent === 0x7c00)
+      exponent = 0xff << 10;
+    else if (exponent !== 0)
+      exponent += (127 - 15) << 10;
+    else if (fraction !== 0)
+      return fraction * POW_2_24;
+    
+    tempDataView.setUint32(0, sign << 16 | exponent << 13 | fraction << 13);
+    return tempDataView.getFloat32(0);
+  }
+  function readFloat32() {
+    return read(dataView.getFloat32(offset), 4);
+  }
+  function readFloat64() {
+    return read(dataView.getFloat64(offset), 8);
+  }
+  function readUint8() {
+    return read(dataView.getUint8(offset), 1);
+  }
+  function readUint16() {
+    return read(dataView.getUint16(offset), 2);
+  }
+  function readUint32() {
+    return read(dataView.getUint32(offset), 4);
+  }
+  function readUint64() {
+    return readUint32() * POW_2_32 + readUint32();
+  }
+  function readBreak() {
+    if (dataView.getUint8(offset) !== 0xff)
+      return false;
+    offset += 1;
+    return true;
+  }
+  function readLength(additionalInformation) {
+    if (additionalInformation < 24)
+      return additionalInformation;
+    if (additionalInformation === 24)
+      return readUint8();
+    if (additionalInformation === 25)
+      return readUint16();
+    if (additionalInformation === 26)
+      return readUint32();
+    if (additionalInformation === 27)
+      return readUint64();
+    if (additionalInformation === 31)
+      return -1;
+    throw "Invalid length encoding";
+  }
+  function readIndefiniteStringLength(majorType) {
+    var initialByte = readUint8();
+    if (initialByte === 0xff)
+      return -1;
+    var length = readLength(initialByte & 0x1f);
+    if (length < 0 || (initialByte >> 5) !== majorType)
+      throw "Invalid indefinite length element";
+    return length;
+  }
+
+  function appendUtf16data(utf16data, length) {
+    for (var i = 0; i < length; ++i) {
+      var value = readUint8();
+      if (value & 0x80) {
+        if (value < 0xe0) {
+          value = (value & 0x1f) <<  6
+                | (readUint8() & 0x3f);
+          length -= 1;
+        } else if (value < 0xf0) {
+          value = (value & 0x0f) << 12
+                | (readUint8() & 0x3f) << 6
+                | (readUint8() & 0x3f);
+          length -= 2;
+        } else {
+          value = (value & 0x0f) << 18
+                | (readUint8() & 0x3f) << 12
+                | (readUint8() & 0x3f) << 6
+                | (readUint8() & 0x3f);
+          length -= 3;
+        }
+      }
+
+      if (value < 0x10000) {
+        utf16data.push(value);
+      } else {
+        value -= 0x10000;
+        utf16data.push(0xd800 | (value >> 10));
+        utf16data.push(0xdc00 | (value & 0x3ff));
+      }
+    }
+  }
+
+  function decodeItem() {
+    var initialByte = readUint8();
+    var majorType = initialByte >> 5;
+    var additionalInformation = initialByte & 0x1f;
+    var i;
+    var length;
+
+    if (majorType === 7) {
+      switch (additionalInformation) {
+        case 25:
+          return readFloat16();
+        case 26:
+          return readFloat32();
+        case 27:
+          return readFloat64();
+      }
+    }
+
+    length = readLength(additionalInformation);
+    if (length < 0 && (majorType < 2 || 6 < majorType))
+      throw "Invalid length";
+
+    switch (majorType) {
+      case 0:
+        return length;
+      case 1:
+        return -1 - length;
+      case 2:
+        if (length < 0) {
+          var elements = [];
+          var fullArrayLength = 0;
+          while ((length = readIndefiniteStringLength(majorType)) >= 0) {
+            fullArrayLength += length;
+            elements.push(readArrayBuffer(length));
+          }
+          var fullArray = new Uint8Array(fullArrayLength);
+          var fullArrayOffset = 0;
+          for (i = 0; i < elements.length; ++i) {
+            fullArray.set(elements[i], fullArrayOffset);
+            fullArrayOffset += elements[i].length;
+          }
+          return fullArray;
+        }
+        return readArrayBuffer(length);
+      case 3:
+        var utf16data = [];
+        if (length < 0) {
+          while ((length = readIndefiniteStringLength(majorType)) >= 0)
+            appendUtf16data(utf16data, length);
+        } else
+          appendUtf16data(utf16data, length);
+        return String.fromCharCode.apply(null, utf16data);
+      case 4:
+        var retArray;
+        if (length < 0) {
+          retArray = [];
+          while (!readBreak())
+            retArray.push(decodeItem());
+        } else {
+          retArray = new Array(length);
+          for (i = 0; i < length; ++i)
+            retArray[i] = decodeItem();
+        }
+        return retArray;
+      case 5:
+        var retObject = {};
+        for (i = 0; i < length || length < 0 && !readBreak(); ++i) {
+          var key = decodeItem();
+          retObject[key] = decodeItem();
+        }
+        return retObject;
+      case 6:
+        return tagger(decodeItem(), length);
+      case 7:
+        switch (length) {
+          case 20:
+            return false;
+          case 21:
+            return true;
+          case 22:
+            return null;
+          case 23:
+            return undefined;
+          default:
+            return simpleValue(length);
+        }
+    }
+  }
+
+  var ret = decodeItem();
+  if (offset !== data.byteLength)
+    throw "Remaining bytes";
+  return ret;
+}
+
+var obj = { encode: encode, decode: decode };
+
+if (typeof define === "function" && define.amd)
+  define("cbor/cbor", obj);
+else if (typeof module !== 'undefined' && module.exports)
+  module.exports = obj;
+else if (!global.CBOR)
+  global.CBOR = obj;
+
+})(this);
+
+},{}],6:[function(require,module,exports){
+'use strict';
+
+module.exports = require('./es6/crc1').default;
+
+},{"./es6/crc1":17}],7:[function(require,module,exports){
+'use strict';
+
+module.exports = require('./es6/crc16').default;
+
+},{"./es6/crc16":18}],8:[function(require,module,exports){
+'use strict';
+
+module.exports = require('./es6/crc16ccitt').default;
+
+},{"./es6/crc16ccitt":19}],9:[function(require,module,exports){
+'use strict';
+
+module.exports = require('./es6/crc16kermit').default;
+
+},{"./es6/crc16kermit":20}],10:[function(require,module,exports){
+'use strict';
+
+module.exports = require('./es6/crc16modbus').default;
+
+},{"./es6/crc16modbus":21}],11:[function(require,module,exports){
+'use strict';
+
+module.exports = require('./es6/crc16xmodem').default;
+
+},{"./es6/crc16xmodem":22}],12:[function(require,module,exports){
+'use strict';
+
+module.exports = require('./es6/crc24').default;
+
+},{"./es6/crc24":23}],13:[function(require,module,exports){
+'use strict';
+
+module.exports = require('./es6/crc32').default;
+
+},{"./es6/crc32":24}],14:[function(require,module,exports){
+'use strict';
+
+module.exports = require('./es6/crc8').default;
+
+},{"./es6/crc8":25}],15:[function(require,module,exports){
+'use strict';
+
+module.exports = require('./es6/crc81wire').default;
+
+},{"./es6/crc81wire":26}],16:[function(require,module,exports){
+'use strict';
+
+module.exports = require('./es6/crcjam').default;
+
+},{"./es6/crcjam":27}],17:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _buffer = require('buffer');
+
+var _create_buffer = require('./create_buffer');
+
+var _create_buffer2 = _interopRequireDefault(_create_buffer);
+
+var _define_crc = require('./define_crc');
+
+var _define_crc2 = _interopRequireDefault(_define_crc);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+var crc1 = (0, _define_crc2.default)('crc1', function (buf, previous) {
+  if (!_buffer.Buffer.isBuffer(buf)) buf = (0, _create_buffer2.default)(buf);
+
+  var crc = ~~previous;
+  var accum = 0;
+
+  for (var index = 0; index < buf.length; index++) {
+    var byte = buf[index];
+    accum += byte;
+  }
+
+  crc += accum % 256;
+  return crc % 256;
+});
+
+exports.default = crc1;
+
+},{"./create_buffer":28,"./define_crc":29,"buffer":4}],18:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _buffer = require('buffer');
+
+var _create_buffer = require('./create_buffer');
+
+var _create_buffer2 = _interopRequireDefault(_create_buffer);
+
+var _define_crc = require('./define_crc');
+
+var _define_crc2 = _interopRequireDefault(_define_crc);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+// Generated by `./pycrc.py --algorithm=table-driven --model=crc-16 --generate=c`
+// prettier-ignore
+var TABLE = [0x0000, 0xc0c1, 0xc181, 0x0140, 0xc301, 0x03c0, 0x0280, 0xc241, 0xc601, 0x06c0, 0x0780, 0xc741, 0x0500, 0xc5c1, 0xc481, 0x0440, 0xcc01, 0x0cc0, 0x0d80, 0xcd41, 0x0f00, 0xcfc1, 0xce81, 0x0e40, 0x0a00, 0xcac1, 0xcb81, 0x0b40, 0xc901, 0x09c0, 0x0880, 0xc841, 0xd801, 0x18c0, 0x1980, 0xd941, 0x1b00, 0xdbc1, 0xda81, 0x1a40, 0x1e00, 0xdec1, 0xdf81, 0x1f40, 0xdd01, 0x1dc0, 0x1c80, 0xdc41, 0x1400, 0xd4c1, 0xd581, 0x1540, 0xd701, 0x17c0, 0x1680, 0xd641, 0xd201, 0x12c0, 0x1380, 0xd341, 0x1100, 0xd1c1, 0xd081, 0x1040, 0xf001, 0x30c0, 0x3180, 0xf141, 0x3300, 0xf3c1, 0xf281, 0x3240, 0x3600, 0xf6c1, 0xf781, 0x3740, 0xf501, 0x35c0, 0x3480, 0xf441, 0x3c00, 0xfcc1, 0xfd81, 0x3d40, 0xff01, 0x3fc0, 0x3e80, 0xfe41, 0xfa01, 0x3ac0, 0x3b80, 0xfb41, 0x3900, 0xf9c1, 0xf881, 0x3840, 0x2800, 0xe8c1, 0xe981, 0x2940, 0xeb01, 0x2bc0, 0x2a80, 0xea41, 0xee01, 0x2ec0, 0x2f80, 0xef41, 0x2d00, 0xedc1, 0xec81, 0x2c40, 0xe401, 0x24c0, 0x2580, 0xe541, 0x2700, 0xe7c1, 0xe681, 0x2640, 0x2200, 0xe2c1, 0xe381, 0x2340, 0xe101, 0x21c0, 0x2080, 0xe041, 0xa001, 0x60c0, 0x6180, 0xa141, 0x6300, 0xa3c1, 0xa281, 0x6240, 0x6600, 0xa6c1, 0xa781, 0x6740, 0xa501, 0x65c0, 0x6480, 0xa441, 0x6c00, 0xacc1, 0xad81, 0x6d40, 0xaf01, 0x6fc0, 0x6e80, 0xae41, 0xaa01, 0x6ac0, 0x6b80, 0xab41, 0x6900, 0xa9c1, 0xa881, 0x6840, 0x7800, 0xb8c1, 0xb981, 0x7940, 0xbb01, 0x7bc0, 0x7a80, 0xba41, 0xbe01, 0x7ec0, 0x7f80, 0xbf41, 0x7d00, 0xbdc1, 0xbc81, 0x7c40, 0xb401, 0x74c0, 0x7580, 0xb541, 0x7700, 0xb7c1, 0xb681, 0x7640, 0x7200, 0xb2c1, 0xb381, 0x7340, 0xb101, 0x71c0, 0x7080, 0xb041, 0x5000, 0x90c1, 0x9181, 0x5140, 0x9301, 0x53c0, 0x5280, 0x9241, 0x9601, 0x56c0, 0x5780, 0x9741, 0x5500, 0x95c1, 0x9481, 0x5440, 0x9c01, 0x5cc0, 0x5d80, 0x9d41, 0x5f00, 0x9fc1, 0x9e81, 0x5e40, 0x5a00, 0x9ac1, 0x9b81, 0x5b40, 0x9901, 0x59c0, 0x5880, 0x9841, 0x8801, 0x48c0, 0x4980, 0x8941, 0x4b00, 0x8bc1, 0x8a81, 0x4a40, 0x4e00, 0x8ec1, 0x8f81, 0x4f40, 0x8d01, 0x4dc0, 0x4c80, 0x8c41, 0x4400, 0x84c1, 0x8581, 0x4540, 0x8701, 0x47c0, 0x4680, 0x8641, 0x8201, 0x42c0, 0x4380, 0x8341, 0x4100, 0x81c1, 0x8081, 0x4040];
+
+if (typeof Int32Array !== 'undefined') TABLE = new Int32Array(TABLE);
+
+var crc16 = (0, _define_crc2.default)('crc-16', function (buf, previous) {
+  if (!_buffer.Buffer.isBuffer(buf)) buf = (0, _create_buffer2.default)(buf);
+
+  var crc = ~~previous;
+
+  for (var index = 0; index < buf.length; index++) {
+    var byte = buf[index];
+    crc = (TABLE[(crc ^ byte) & 0xff] ^ crc >> 8) & 0xffff;
+  }
+
+  return crc;
+});
+
+exports.default = crc16;
+
+},{"./create_buffer":28,"./define_crc":29,"buffer":4}],19:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _buffer = require('buffer');
+
+var _create_buffer = require('./create_buffer');
+
+var _create_buffer2 = _interopRequireDefault(_create_buffer);
+
+var _define_crc = require('./define_crc');
+
+var _define_crc2 = _interopRequireDefault(_define_crc);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+// Generated by `./pycrc.py --algorithm=table-driven --model=ccitt --generate=c`
+// prettier-ignore
+var TABLE = [0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50a5, 0x60c6, 0x70e7, 0x8108, 0x9129, 0xa14a, 0xb16b, 0xc18c, 0xd1ad, 0xe1ce, 0xf1ef, 0x1231, 0x0210, 0x3273, 0x2252, 0x52b5, 0x4294, 0x72f7, 0x62d6, 0x9339, 0x8318, 0xb37b, 0xa35a, 0xd3bd, 0xc39c, 0xf3ff, 0xe3de, 0x2462, 0x3443, 0x0420, 0x1401, 0x64e6, 0x74c7, 0x44a4, 0x5485, 0xa56a, 0xb54b, 0x8528, 0x9509, 0xe5ee, 0xf5cf, 0xc5ac, 0xd58d, 0x3653, 0x2672, 0x1611, 0x0630, 0x76d7, 0x66f6, 0x5695, 0x46b4, 0xb75b, 0xa77a, 0x9719, 0x8738, 0xf7df, 0xe7fe, 0xd79d, 0xc7bc, 0x48c4, 0x58e5, 0x6886, 0x78a7, 0x0840, 0x1861, 0x2802, 0x3823, 0xc9cc, 0xd9ed, 0xe98e, 0xf9af, 0x8948, 0x9969, 0xa90a, 0xb92b, 0x5af5, 0x4ad4, 0x7ab7, 0x6a96, 0x1a71, 0x0a50, 0x3a33, 0x2a12, 0xdbfd, 0xcbdc, 0xfbbf, 0xeb9e, 0x9b79, 0x8b58, 0xbb3b, 0xab1a, 0x6ca6, 0x7c87, 0x4ce4, 0x5cc5, 0x2c22, 0x3c03, 0x0c60, 0x1c41, 0xedae, 0xfd8f, 0xcdec, 0xddcd, 0xad2a, 0xbd0b, 0x8d68, 0x9d49, 0x7e97, 0x6eb6, 0x5ed5, 0x4ef4, 0x3e13, 0x2e32, 0x1e51, 0x0e70, 0xff9f, 0xefbe, 0xdfdd, 0xcffc, 0xbf1b, 0xaf3a, 0x9f59, 0x8f78, 0x9188, 0x81a9, 0xb1ca, 0xa1eb, 0xd10c, 0xc12d, 0xf14e, 0xe16f, 0x1080, 0x00a1, 0x30c2, 0x20e3, 0x5004, 0x4025, 0x7046, 0x6067, 0x83b9, 0x9398, 0xa3fb, 0xb3da, 0xc33d, 0xd31c, 0xe37f, 0xf35e, 0x02b1, 0x1290, 0x22f3, 0x32d2, 0x4235, 0x5214, 0x6277, 0x7256, 0xb5ea, 0xa5cb, 0x95a8, 0x8589, 0xf56e, 0xe54f, 0xd52c, 0xc50d, 0x34e2, 0x24c3, 0x14a0, 0x0481, 0x7466, 0x6447, 0x5424, 0x4405, 0xa7db, 0xb7fa, 0x8799, 0x97b8, 0xe75f, 0xf77e, 0xc71d, 0xd73c, 0x26d3, 0x36f2, 0x0691, 0x16b0, 0x6657, 0x7676, 0x4615, 0x5634, 0xd94c, 0xc96d, 0xf90e, 0xe92f, 0x99c8, 0x89e9, 0xb98a, 0xa9ab, 0x5844, 0x4865, 0x7806, 0x6827, 0x18c0, 0x08e1, 0x3882, 0x28a3, 0xcb7d, 0xdb5c, 0xeb3f, 0xfb1e, 0x8bf9, 0x9bd8, 0xabbb, 0xbb9a, 0x4a75, 0x5a54, 0x6a37, 0x7a16, 0x0af1, 0x1ad0, 0x2ab3, 0x3a92, 0xfd2e, 0xed0f, 0xdd6c, 0xcd4d, 0xbdaa, 0xad8b, 0x9de8, 0x8dc9, 0x7c26, 0x6c07, 0x5c64, 0x4c45, 0x3ca2, 0x2c83, 0x1ce0, 0x0cc1, 0xef1f, 0xff3e, 0xcf5d, 0xdf7c, 0xaf9b, 0xbfba, 0x8fd9, 0x9ff8, 0x6e17, 0x7e36, 0x4e55, 0x5e74, 0x2e93, 0x3eb2, 0x0ed1, 0x1ef0];
+
+if (typeof Int32Array !== 'undefined') TABLE = new Int32Array(TABLE);
+
+var crc16ccitt = (0, _define_crc2.default)('ccitt', function (buf, previous) {
+  if (!_buffer.Buffer.isBuffer(buf)) buf = (0, _create_buffer2.default)(buf);
+
+  var crc = typeof previous !== 'undefined' ? ~~previous : 0xffff;
+
+  for (var index = 0; index < buf.length; index++) {
+    var byte = buf[index];
+    crc = (TABLE[(crc >> 8 ^ byte) & 0xff] ^ crc << 8) & 0xffff;
+  }
+
+  return crc;
+});
+
+exports.default = crc16ccitt;
+
+},{"./create_buffer":28,"./define_crc":29,"buffer":4}],20:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _buffer = require('buffer');
+
+var _create_buffer = require('./create_buffer');
+
+var _create_buffer2 = _interopRequireDefault(_create_buffer);
+
+var _define_crc = require('./define_crc');
+
+var _define_crc2 = _interopRequireDefault(_define_crc);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+// Generated by `./pycrc.py --algorithm=table-driven --model=kermit --generate=c`
+// prettier-ignore
+var TABLE = [0x0000, 0x1189, 0x2312, 0x329b, 0x4624, 0x57ad, 0x6536, 0x74bf, 0x8c48, 0x9dc1, 0xaf5a, 0xbed3, 0xca6c, 0xdbe5, 0xe97e, 0xf8f7, 0x1081, 0x0108, 0x3393, 0x221a, 0x56a5, 0x472c, 0x75b7, 0x643e, 0x9cc9, 0x8d40, 0xbfdb, 0xae52, 0xdaed, 0xcb64, 0xf9ff, 0xe876, 0x2102, 0x308b, 0x0210, 0x1399, 0x6726, 0x76af, 0x4434, 0x55bd, 0xad4a, 0xbcc3, 0x8e58, 0x9fd1, 0xeb6e, 0xfae7, 0xc87c, 0xd9f5, 0x3183, 0x200a, 0x1291, 0x0318, 0x77a7, 0x662e, 0x54b5, 0x453c, 0xbdcb, 0xac42, 0x9ed9, 0x8f50, 0xfbef, 0xea66, 0xd8fd, 0xc974, 0x4204, 0x538d, 0x6116, 0x709f, 0x0420, 0x15a9, 0x2732, 0x36bb, 0xce4c, 0xdfc5, 0xed5e, 0xfcd7, 0x8868, 0x99e1, 0xab7a, 0xbaf3, 0x5285, 0x430c, 0x7197, 0x601e, 0x14a1, 0x0528, 0x37b3, 0x263a, 0xdecd, 0xcf44, 0xfddf, 0xec56, 0x98e9, 0x8960, 0xbbfb, 0xaa72, 0x6306, 0x728f, 0x4014, 0x519d, 0x2522, 0x34ab, 0x0630, 0x17b9, 0xef4e, 0xfec7, 0xcc5c, 0xddd5, 0xa96a, 0xb8e3, 0x8a78, 0x9bf1, 0x7387, 0x620e, 0x5095, 0x411c, 0x35a3, 0x242a, 0x16b1, 0x0738, 0xffcf, 0xee46, 0xdcdd, 0xcd54, 0xb9eb, 0xa862, 0x9af9, 0x8b70, 0x8408, 0x9581, 0xa71a, 0xb693, 0xc22c, 0xd3a5, 0xe13e, 0xf0b7, 0x0840, 0x19c9, 0x2b52, 0x3adb, 0x4e64, 0x5fed, 0x6d76, 0x7cff, 0x9489, 0x8500, 0xb79b, 0xa612, 0xd2ad, 0xc324, 0xf1bf, 0xe036, 0x18c1, 0x0948, 0x3bd3, 0x2a5a, 0x5ee5, 0x4f6c, 0x7df7, 0x6c7e, 0xa50a, 0xb483, 0x8618, 0x9791, 0xe32e, 0xf2a7, 0xc03c, 0xd1b5, 0x2942, 0x38cb, 0x0a50, 0x1bd9, 0x6f66, 0x7eef, 0x4c74, 0x5dfd, 0xb58b, 0xa402, 0x9699, 0x8710, 0xf3af, 0xe226, 0xd0bd, 0xc134, 0x39c3, 0x284a, 0x1ad1, 0x0b58, 0x7fe7, 0x6e6e, 0x5cf5, 0x4d7c, 0xc60c, 0xd785, 0xe51e, 0xf497, 0x8028, 0x91a1, 0xa33a, 0xb2b3, 0x4a44, 0x5bcd, 0x6956, 0x78df, 0x0c60, 0x1de9, 0x2f72, 0x3efb, 0xd68d, 0xc704, 0xf59f, 0xe416, 0x90a9, 0x8120, 0xb3bb, 0xa232, 0x5ac5, 0x4b4c, 0x79d7, 0x685e, 0x1ce1, 0x0d68, 0x3ff3, 0x2e7a, 0xe70e, 0xf687, 0xc41c, 0xd595, 0xa12a, 0xb0a3, 0x8238, 0x93b1, 0x6b46, 0x7acf, 0x4854, 0x59dd, 0x2d62, 0x3ceb, 0x0e70, 0x1ff9, 0xf78f, 0xe606, 0xd49d, 0xc514, 0xb1ab, 0xa022, 0x92b9, 0x8330, 0x7bc7, 0x6a4e, 0x58d5, 0x495c, 0x3de3, 0x2c6a, 0x1ef1, 0x0f78];
+
+if (typeof Int32Array !== 'undefined') TABLE = new Int32Array(TABLE);
+
+var crc16kermit = (0, _define_crc2.default)('kermit', function (buf, previous) {
+  if (!_buffer.Buffer.isBuffer(buf)) buf = (0, _create_buffer2.default)(buf);
+
+  var crc = typeof previous !== 'undefined' ? ~~previous : 0x0000;
+
+  for (var index = 0; index < buf.length; index++) {
+    var byte = buf[index];
+    crc = (TABLE[(crc ^ byte) & 0xff] ^ crc >> 8) & 0xffff;
+  }
+
+  return crc;
+});
+
+exports.default = crc16kermit;
+
+},{"./create_buffer":28,"./define_crc":29,"buffer":4}],21:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _buffer = require('buffer');
+
+var _create_buffer = require('./create_buffer');
+
+var _create_buffer2 = _interopRequireDefault(_create_buffer);
+
+var _define_crc = require('./define_crc');
+
+var _define_crc2 = _interopRequireDefault(_define_crc);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+// Generated by `./pycrc.py --algorithm=table-driven --model=crc-16-modbus --generate=c`
+// prettier-ignore
+var TABLE = [0x0000, 0xc0c1, 0xc181, 0x0140, 0xc301, 0x03c0, 0x0280, 0xc241, 0xc601, 0x06c0, 0x0780, 0xc741, 0x0500, 0xc5c1, 0xc481, 0x0440, 0xcc01, 0x0cc0, 0x0d80, 0xcd41, 0x0f00, 0xcfc1, 0xce81, 0x0e40, 0x0a00, 0xcac1, 0xcb81, 0x0b40, 0xc901, 0x09c0, 0x0880, 0xc841, 0xd801, 0x18c0, 0x1980, 0xd941, 0x1b00, 0xdbc1, 0xda81, 0x1a40, 0x1e00, 0xdec1, 0xdf81, 0x1f40, 0xdd01, 0x1dc0, 0x1c80, 0xdc41, 0x1400, 0xd4c1, 0xd581, 0x1540, 0xd701, 0x17c0, 0x1680, 0xd641, 0xd201, 0x12c0, 0x1380, 0xd341, 0x1100, 0xd1c1, 0xd081, 0x1040, 0xf001, 0x30c0, 0x3180, 0xf141, 0x3300, 0xf3c1, 0xf281, 0x3240, 0x3600, 0xf6c1, 0xf781, 0x3740, 0xf501, 0x35c0, 0x3480, 0xf441, 0x3c00, 0xfcc1, 0xfd81, 0x3d40, 0xff01, 0x3fc0, 0x3e80, 0xfe41, 0xfa01, 0x3ac0, 0x3b80, 0xfb41, 0x3900, 0xf9c1, 0xf881, 0x3840, 0x2800, 0xe8c1, 0xe981, 0x2940, 0xeb01, 0x2bc0, 0x2a80, 0xea41, 0xee01, 0x2ec0, 0x2f80, 0xef41, 0x2d00, 0xedc1, 0xec81, 0x2c40, 0xe401, 0x24c0, 0x2580, 0xe541, 0x2700, 0xe7c1, 0xe681, 0x2640, 0x2200, 0xe2c1, 0xe381, 0x2340, 0xe101, 0x21c0, 0x2080, 0xe041, 0xa001, 0x60c0, 0x6180, 0xa141, 0x6300, 0xa3c1, 0xa281, 0x6240, 0x6600, 0xa6c1, 0xa781, 0x6740, 0xa501, 0x65c0, 0x6480, 0xa441, 0x6c00, 0xacc1, 0xad81, 0x6d40, 0xaf01, 0x6fc0, 0x6e80, 0xae41, 0xaa01, 0x6ac0, 0x6b80, 0xab41, 0x6900, 0xa9c1, 0xa881, 0x6840, 0x7800, 0xb8c1, 0xb981, 0x7940, 0xbb01, 0x7bc0, 0x7a80, 0xba41, 0xbe01, 0x7ec0, 0x7f80, 0xbf41, 0x7d00, 0xbdc1, 0xbc81, 0x7c40, 0xb401, 0x74c0, 0x7580, 0xb541, 0x7700, 0xb7c1, 0xb681, 0x7640, 0x7200, 0xb2c1, 0xb381, 0x7340, 0xb101, 0x71c0, 0x7080, 0xb041, 0x5000, 0x90c1, 0x9181, 0x5140, 0x9301, 0x53c0, 0x5280, 0x9241, 0x9601, 0x56c0, 0x5780, 0x9741, 0x5500, 0x95c1, 0x9481, 0x5440, 0x9c01, 0x5cc0, 0x5d80, 0x9d41, 0x5f00, 0x9fc1, 0x9e81, 0x5e40, 0x5a00, 0x9ac1, 0x9b81, 0x5b40, 0x9901, 0x59c0, 0x5880, 0x9841, 0x8801, 0x48c0, 0x4980, 0x8941, 0x4b00, 0x8bc1, 0x8a81, 0x4a40, 0x4e00, 0x8ec1, 0x8f81, 0x4f40, 0x8d01, 0x4dc0, 0x4c80, 0x8c41, 0x4400, 0x84c1, 0x8581, 0x4540, 0x8701, 0x47c0, 0x4680, 0x8641, 0x8201, 0x42c0, 0x4380, 0x8341, 0x4100, 0x81c1, 0x8081, 0x4040];
+
+if (typeof Int32Array !== 'undefined') TABLE = new Int32Array(TABLE);
+
+var crc16modbus = (0, _define_crc2.default)('crc-16-modbus', function (buf, previous) {
+  if (!_buffer.Buffer.isBuffer(buf)) buf = (0, _create_buffer2.default)(buf);
+
+  var crc = typeof previous !== 'undefined' ? ~~previous : 0xffff;
+
+  for (var index = 0; index < buf.length; index++) {
+    var byte = buf[index];
+    crc = (TABLE[(crc ^ byte) & 0xff] ^ crc >> 8) & 0xffff;
+  }
+
+  return crc;
+});
+
+exports.default = crc16modbus;
+
+},{"./create_buffer":28,"./define_crc":29,"buffer":4}],22:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _buffer = require('buffer');
+
+var _create_buffer = require('./create_buffer');
+
+var _create_buffer2 = _interopRequireDefault(_create_buffer);
+
+var _define_crc = require('./define_crc');
+
+var _define_crc2 = _interopRequireDefault(_define_crc);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+var crc16xmodem = (0, _define_crc2.default)('xmodem', function (buf, previous) {
+  if (!_buffer.Buffer.isBuffer(buf)) buf = (0, _create_buffer2.default)(buf);
+
+  var crc = typeof previous !== 'undefined' ? ~~previous : 0x0;
+
+  for (var index = 0; index < buf.length; index++) {
+    var byte = buf[index];
+    var code = crc >>> 8 & 0xff;
+
+    code ^= byte & 0xff;
+    code ^= code >>> 4;
+    crc = crc << 8 & 0xffff;
+    crc ^= code;
+    code = code << 5 & 0xffff;
+    crc ^= code;
+    code = code << 7 & 0xffff;
+    crc ^= code;
+  }
+
+  return crc;
+});
+
+exports.default = crc16xmodem;
+
+},{"./create_buffer":28,"./define_crc":29,"buffer":4}],23:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _buffer = require('buffer');
+
+var _create_buffer = require('./create_buffer');
+
+var _create_buffer2 = _interopRequireDefault(_create_buffer);
+
+var _define_crc = require('./define_crc');
+
+var _define_crc2 = _interopRequireDefault(_define_crc);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+// Generated by `./pycrc.py --algorithm=table-drive --model=crc-24 --generate=c`
+// prettier-ignore
+var TABLE = [0x000000, 0x864cfb, 0x8ad50d, 0x0c99f6, 0x93e6e1, 0x15aa1a, 0x1933ec, 0x9f7f17, 0xa18139, 0x27cdc2, 0x2b5434, 0xad18cf, 0x3267d8, 0xb42b23, 0xb8b2d5, 0x3efe2e, 0xc54e89, 0x430272, 0x4f9b84, 0xc9d77f, 0x56a868, 0xd0e493, 0xdc7d65, 0x5a319e, 0x64cfb0, 0xe2834b, 0xee1abd, 0x685646, 0xf72951, 0x7165aa, 0x7dfc5c, 0xfbb0a7, 0x0cd1e9, 0x8a9d12, 0x8604e4, 0x00481f, 0x9f3708, 0x197bf3, 0x15e205, 0x93aefe, 0xad50d0, 0x2b1c2b, 0x2785dd, 0xa1c926, 0x3eb631, 0xb8faca, 0xb4633c, 0x322fc7, 0xc99f60, 0x4fd39b, 0x434a6d, 0xc50696, 0x5a7981, 0xdc357a, 0xd0ac8c, 0x56e077, 0x681e59, 0xee52a2, 0xe2cb54, 0x6487af, 0xfbf8b8, 0x7db443, 0x712db5, 0xf7614e, 0x19a3d2, 0x9fef29, 0x9376df, 0x153a24, 0x8a4533, 0x0c09c8, 0x00903e, 0x86dcc5, 0xb822eb, 0x3e6e10, 0x32f7e6, 0xb4bb1d, 0x2bc40a, 0xad88f1, 0xa11107, 0x275dfc, 0xdced5b, 0x5aa1a0, 0x563856, 0xd074ad, 0x4f0bba, 0xc94741, 0xc5deb7, 0x43924c, 0x7d6c62, 0xfb2099, 0xf7b96f, 0x71f594, 0xee8a83, 0x68c678, 0x645f8e, 0xe21375, 0x15723b, 0x933ec0, 0x9fa736, 0x19ebcd, 0x8694da, 0x00d821, 0x0c41d7, 0x8a0d2c, 0xb4f302, 0x32bff9, 0x3e260f, 0xb86af4, 0x2715e3, 0xa15918, 0xadc0ee, 0x2b8c15, 0xd03cb2, 0x567049, 0x5ae9bf, 0xdca544, 0x43da53, 0xc596a8, 0xc90f5e, 0x4f43a5, 0x71bd8b, 0xf7f170, 0xfb6886, 0x7d247d, 0xe25b6a, 0x641791, 0x688e67, 0xeec29c, 0x3347a4, 0xb50b5f, 0xb992a9, 0x3fde52, 0xa0a145, 0x26edbe, 0x2a7448, 0xac38b3, 0x92c69d, 0x148a66, 0x181390, 0x9e5f6b, 0x01207c, 0x876c87, 0x8bf571, 0x0db98a, 0xf6092d, 0x7045d6, 0x7cdc20, 0xfa90db, 0x65efcc, 0xe3a337, 0xef3ac1, 0x69763a, 0x578814, 0xd1c4ef, 0xdd5d19, 0x5b11e2, 0xc46ef5, 0x42220e, 0x4ebbf8, 0xc8f703, 0x3f964d, 0xb9dab6, 0xb54340, 0x330fbb, 0xac70ac, 0x2a3c57, 0x26a5a1, 0xa0e95a, 0x9e1774, 0x185b8f, 0x14c279, 0x928e82, 0x0df195, 0x8bbd6e, 0x872498, 0x016863, 0xfad8c4, 0x7c943f, 0x700dc9, 0xf64132, 0x693e25, 0xef72de, 0xe3eb28, 0x65a7d3, 0x5b59fd, 0xdd1506, 0xd18cf0, 0x57c00b, 0xc8bf1c, 0x4ef3e7, 0x426a11, 0xc426ea, 0x2ae476, 0xaca88d, 0xa0317b, 0x267d80, 0xb90297, 0x3f4e6c, 0x33d79a, 0xb59b61, 0x8b654f, 0x0d29b4, 0x01b042, 0x87fcb9, 0x1883ae, 0x9ecf55, 0x9256a3, 0x141a58, 0xefaaff, 0x69e604, 0x657ff2, 0xe33309, 0x7c4c1e, 0xfa00e5, 0xf69913, 0x70d5e8, 0x4e2bc6, 0xc8673d, 0xc4fecb, 0x42b230, 0xddcd27, 0x5b81dc, 0x57182a, 0xd154d1, 0x26359f, 0xa07964, 0xace092, 0x2aac69, 0xb5d37e, 0x339f85, 0x3f0673, 0xb94a88, 0x87b4a6, 0x01f85d, 0x0d61ab, 0x8b2d50, 0x145247, 0x921ebc, 0x9e874a, 0x18cbb1, 0xe37b16, 0x6537ed, 0x69ae1b, 0xefe2e0, 0x709df7, 0xf6d10c, 0xfa48fa, 0x7c0401, 0x42fa2f, 0xc4b6d4, 0xc82f22, 0x4e63d9, 0xd11cce, 0x575035, 0x5bc9c3, 0xdd8538];
+
+if (typeof Int32Array !== 'undefined') TABLE = new Int32Array(TABLE);
+
+var crc24 = (0, _define_crc2.default)('crc-24', function (buf, previous) {
+  if (!_buffer.Buffer.isBuffer(buf)) buf = (0, _create_buffer2.default)(buf);
+
+  var crc = typeof previous !== 'undefined' ? ~~previous : 0xb704ce;
+
+  for (var index = 0; index < buf.length; index++) {
+    var byte = buf[index];
+    crc = (TABLE[(crc >> 16 ^ byte) & 0xff] ^ crc << 8) & 0xffffff;
+  }
+
+  return crc;
+});
+
+exports.default = crc24;
+
+},{"./create_buffer":28,"./define_crc":29,"buffer":4}],24:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _buffer = require('buffer');
+
+var _create_buffer = require('./create_buffer');
+
+var _create_buffer2 = _interopRequireDefault(_create_buffer);
+
+var _define_crc = require('./define_crc');
+
+var _define_crc2 = _interopRequireDefault(_define_crc);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+// Generated by `./pycrc.py --algorithm=table-driven --model=crc-32 --generate=c`
+// prettier-ignore
+var TABLE = [0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f, 0xe963a535, 0x9e6495a3, 0x0edb8832, 0x79dcb8a4, 0xe0d5e91e, 0x97d2d988, 0x09b64c2b, 0x7eb17cbd, 0xe7b82d07, 0x90bf1d91, 0x1db71064, 0x6ab020f2, 0xf3b97148, 0x84be41de, 0x1adad47d, 0x6ddde4eb, 0xf4d4b551, 0x83d385c7, 0x136c9856, 0x646ba8c0, 0xfd62f97a, 0x8a65c9ec, 0x14015c4f, 0x63066cd9, 0xfa0f3d63, 0x8d080df5, 0x3b6e20c8, 0x4c69105e, 0xd56041e4, 0xa2677172, 0x3c03e4d1, 0x4b04d447, 0xd20d85fd, 0xa50ab56b, 0x35b5a8fa, 0x42b2986c, 0xdbbbc9d6, 0xacbcf940, 0x32d86ce3, 0x45df5c75, 0xdcd60dcf, 0xabd13d59, 0x26d930ac, 0x51de003a, 0xc8d75180, 0xbfd06116, 0x21b4f4b5, 0x56b3c423, 0xcfba9599, 0xb8bda50f, 0x2802b89e, 0x5f058808, 0xc60cd9b2, 0xb10be924, 0x2f6f7c87, 0x58684c11, 0xc1611dab, 0xb6662d3d, 0x76dc4190, 0x01db7106, 0x98d220bc, 0xefd5102a, 0x71b18589, 0x06b6b51f, 0x9fbfe4a5, 0xe8b8d433, 0x7807c9a2, 0x0f00f934, 0x9609a88e, 0xe10e9818, 0x7f6a0dbb, 0x086d3d2d, 0x91646c97, 0xe6635c01, 0x6b6b51f4, 0x1c6c6162, 0x856530d8, 0xf262004e, 0x6c0695ed, 0x1b01a57b, 0x8208f4c1, 0xf50fc457, 0x65b0d9c6, 0x12b7e950, 0x8bbeb8ea, 0xfcb9887c, 0x62dd1ddf, 0x15da2d49, 0x8cd37cf3, 0xfbd44c65, 0x4db26158, 0x3ab551ce, 0xa3bc0074, 0xd4bb30e2, 0x4adfa541, 0x3dd895d7, 0xa4d1c46d, 0xd3d6f4fb, 0x4369e96a, 0x346ed9fc, 0xad678846, 0xda60b8d0, 0x44042d73, 0x33031de5, 0xaa0a4c5f, 0xdd0d7cc9, 0x5005713c, 0x270241aa, 0xbe0b1010, 0xc90c2086, 0x5768b525, 0x206f85b3, 0xb966d409, 0xce61e49f, 0x5edef90e, 0x29d9c998, 0xb0d09822, 0xc7d7a8b4, 0x59b33d17, 0x2eb40d81, 0xb7bd5c3b, 0xc0ba6cad, 0xedb88320, 0x9abfb3b6, 0x03b6e20c, 0x74b1d29a, 0xead54739, 0x9dd277af, 0x04db2615, 0x73dc1683, 0xe3630b12, 0x94643b84, 0x0d6d6a3e, 0x7a6a5aa8, 0xe40ecf0b, 0x9309ff9d, 0x0a00ae27, 0x7d079eb1, 0xf00f9344, 0x8708a3d2, 0x1e01f268, 0x6906c2fe, 0xf762575d, 0x806567cb, 0x196c3671, 0x6e6b06e7, 0xfed41b76, 0x89d32be0, 0x10da7a5a, 0x67dd4acc, 0xf9b9df6f, 0x8ebeeff9, 0x17b7be43, 0x60b08ed5, 0xd6d6a3e8, 0xa1d1937e, 0x38d8c2c4, 0x4fdff252, 0xd1bb67f1, 0xa6bc5767, 0x3fb506dd, 0x48b2364b, 0xd80d2bda, 0xaf0a1b4c, 0x36034af6, 0x41047a60, 0xdf60efc3, 0xa867df55, 0x316e8eef, 0x4669be79, 0xcb61b38c, 0xbc66831a, 0x256fd2a0, 0x5268e236, 0xcc0c7795, 0xbb0b4703, 0x220216b9, 0x5505262f, 0xc5ba3bbe, 0xb2bd0b28, 0x2bb45a92, 0x5cb36a04, 0xc2d7ffa7, 0xb5d0cf31, 0x2cd99e8b, 0x5bdeae1d, 0x9b64c2b0, 0xec63f226, 0x756aa39c, 0x026d930a, 0x9c0906a9, 0xeb0e363f, 0x72076785, 0x05005713, 0x95bf4a82, 0xe2b87a14, 0x7bb12bae, 0x0cb61b38, 0x92d28e9b, 0xe5d5be0d, 0x7cdcefb7, 0x0bdbdf21, 0x86d3d2d4, 0xf1d4e242, 0x68ddb3f8, 0x1fda836e, 0x81be16cd, 0xf6b9265b, 0x6fb077e1, 0x18b74777, 0x88085ae6, 0xff0f6a70, 0x66063bca, 0x11010b5c, 0x8f659eff, 0xf862ae69, 0x616bffd3, 0x166ccf45, 0xa00ae278, 0xd70dd2ee, 0x4e048354, 0x3903b3c2, 0xa7672661, 0xd06016f7, 0x4969474d, 0x3e6e77db, 0xaed16a4a, 0xd9d65adc, 0x40df0b66, 0x37d83bf0, 0xa9bcae53, 0xdebb9ec5, 0x47b2cf7f, 0x30b5ffe9, 0xbdbdf21c, 0xcabac28a, 0x53b39330, 0x24b4a3a6, 0xbad03605, 0xcdd70693, 0x54de5729, 0x23d967bf, 0xb3667a2e, 0xc4614ab8, 0x5d681b02, 0x2a6f2b94, 0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d];
+
+if (typeof Int32Array !== 'undefined') TABLE = new Int32Array(TABLE);
+
+var crc32 = (0, _define_crc2.default)('crc-32', function (buf, previous) {
+  if (!_buffer.Buffer.isBuffer(buf)) buf = (0, _create_buffer2.default)(buf);
+
+  var crc = previous === 0 ? 0 : ~~previous ^ -1;
+
+  for (var index = 0; index < buf.length; index++) {
+    var byte = buf[index];
+    crc = TABLE[(crc ^ byte) & 0xff] ^ crc >>> 8;
+  }
+
+  return crc ^ -1;
+});
+
+exports.default = crc32;
+
+},{"./create_buffer":28,"./define_crc":29,"buffer":4}],25:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _buffer = require('buffer');
+
+var _create_buffer = require('./create_buffer');
+
+var _create_buffer2 = _interopRequireDefault(_create_buffer);
+
+var _define_crc = require('./define_crc');
+
+var _define_crc2 = _interopRequireDefault(_define_crc);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+// Generated by `./pycrc.py --algorithm=table-driven --model=crc-8 --generate=c`
+// prettier-ignore
+var TABLE = [0x00, 0x07, 0x0e, 0x09, 0x1c, 0x1b, 0x12, 0x15, 0x38, 0x3f, 0x36, 0x31, 0x24, 0x23, 0x2a, 0x2d, 0x70, 0x77, 0x7e, 0x79, 0x6c, 0x6b, 0x62, 0x65, 0x48, 0x4f, 0x46, 0x41, 0x54, 0x53, 0x5a, 0x5d, 0xe0, 0xe7, 0xee, 0xe9, 0xfc, 0xfb, 0xf2, 0xf5, 0xd8, 0xdf, 0xd6, 0xd1, 0xc4, 0xc3, 0xca, 0xcd, 0x90, 0x97, 0x9e, 0x99, 0x8c, 0x8b, 0x82, 0x85, 0xa8, 0xaf, 0xa6, 0xa1, 0xb4, 0xb3, 0xba, 0xbd, 0xc7, 0xc0, 0xc9, 0xce, 0xdb, 0xdc, 0xd5, 0xd2, 0xff, 0xf8, 0xf1, 0xf6, 0xe3, 0xe4, 0xed, 0xea, 0xb7, 0xb0, 0xb9, 0xbe, 0xab, 0xac, 0xa5, 0xa2, 0x8f, 0x88, 0x81, 0x86, 0x93, 0x94, 0x9d, 0x9a, 0x27, 0x20, 0x29, 0x2e, 0x3b, 0x3c, 0x35, 0x32, 0x1f, 0x18, 0x11, 0x16, 0x03, 0x04, 0x0d, 0x0a, 0x57, 0x50, 0x59, 0x5e, 0x4b, 0x4c, 0x45, 0x42, 0x6f, 0x68, 0x61, 0x66, 0x73, 0x74, 0x7d, 0x7a, 0x89, 0x8e, 0x87, 0x80, 0x95, 0x92, 0x9b, 0x9c, 0xb1, 0xb6, 0xbf, 0xb8, 0xad, 0xaa, 0xa3, 0xa4, 0xf9, 0xfe, 0xf7, 0xf0, 0xe5, 0xe2, 0xeb, 0xec, 0xc1, 0xc6, 0xcf, 0xc8, 0xdd, 0xda, 0xd3, 0xd4, 0x69, 0x6e, 0x67, 0x60, 0x75, 0x72, 0x7b, 0x7c, 0x51, 0x56, 0x5f, 0x58, 0x4d, 0x4a, 0x43, 0x44, 0x19, 0x1e, 0x17, 0x10, 0x05, 0x02, 0x0b, 0x0c, 0x21, 0x26, 0x2f, 0x28, 0x3d, 0x3a, 0x33, 0x34, 0x4e, 0x49, 0x40, 0x47, 0x52, 0x55, 0x5c, 0x5b, 0x76, 0x71, 0x78, 0x7f, 0x6a, 0x6d, 0x64, 0x63, 0x3e, 0x39, 0x30, 0x37, 0x22, 0x25, 0x2c, 0x2b, 0x06, 0x01, 0x08, 0x0f, 0x1a, 0x1d, 0x14, 0x13, 0xae, 0xa9, 0xa0, 0xa7, 0xb2, 0xb5, 0xbc, 0xbb, 0x96, 0x91, 0x98, 0x9f, 0x8a, 0x8d, 0x84, 0x83, 0xde, 0xd9, 0xd0, 0xd7, 0xc2, 0xc5, 0xcc, 0xcb, 0xe6, 0xe1, 0xe8, 0xef, 0xfa, 0xfd, 0xf4, 0xf3];
+
+if (typeof Int32Array !== 'undefined') TABLE = new Int32Array(TABLE);
+
+var crc8 = (0, _define_crc2.default)('crc-8', function (buf, previous) {
+  if (!_buffer.Buffer.isBuffer(buf)) buf = (0, _create_buffer2.default)(buf);
+
+  var crc = ~~previous;
+
+  for (var index = 0; index < buf.length; index++) {
+    var byte = buf[index];
+    crc = TABLE[(crc ^ byte) & 0xff] & 0xff;
+  }
+
+  return crc;
+});
+
+exports.default = crc8;
+
+},{"./create_buffer":28,"./define_crc":29,"buffer":4}],26:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _buffer = require('buffer');
+
+var _create_buffer = require('./create_buffer');
+
+var _create_buffer2 = _interopRequireDefault(_create_buffer);
+
+var _define_crc = require('./define_crc');
+
+var _define_crc2 = _interopRequireDefault(_define_crc);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+// Generated by `./pycrc.py --algorithm=table-driven --model=dallas-1-wire --generate=c`
+// prettier-ignore
+var TABLE = [0x00, 0x5e, 0xbc, 0xe2, 0x61, 0x3f, 0xdd, 0x83, 0xc2, 0x9c, 0x7e, 0x20, 0xa3, 0xfd, 0x1f, 0x41, 0x9d, 0xc3, 0x21, 0x7f, 0xfc, 0xa2, 0x40, 0x1e, 0x5f, 0x01, 0xe3, 0xbd, 0x3e, 0x60, 0x82, 0xdc, 0x23, 0x7d, 0x9f, 0xc1, 0x42, 0x1c, 0xfe, 0xa0, 0xe1, 0xbf, 0x5d, 0x03, 0x80, 0xde, 0x3c, 0x62, 0xbe, 0xe0, 0x02, 0x5c, 0xdf, 0x81, 0x63, 0x3d, 0x7c, 0x22, 0xc0, 0x9e, 0x1d, 0x43, 0xa1, 0xff, 0x46, 0x18, 0xfa, 0xa4, 0x27, 0x79, 0x9b, 0xc5, 0x84, 0xda, 0x38, 0x66, 0xe5, 0xbb, 0x59, 0x07, 0xdb, 0x85, 0x67, 0x39, 0xba, 0xe4, 0x06, 0x58, 0x19, 0x47, 0xa5, 0xfb, 0x78, 0x26, 0xc4, 0x9a, 0x65, 0x3b, 0xd9, 0x87, 0x04, 0x5a, 0xb8, 0xe6, 0xa7, 0xf9, 0x1b, 0x45, 0xc6, 0x98, 0x7a, 0x24, 0xf8, 0xa6, 0x44, 0x1a, 0x99, 0xc7, 0x25, 0x7b, 0x3a, 0x64, 0x86, 0xd8, 0x5b, 0x05, 0xe7, 0xb9, 0x8c, 0xd2, 0x30, 0x6e, 0xed, 0xb3, 0x51, 0x0f, 0x4e, 0x10, 0xf2, 0xac, 0x2f, 0x71, 0x93, 0xcd, 0x11, 0x4f, 0xad, 0xf3, 0x70, 0x2e, 0xcc, 0x92, 0xd3, 0x8d, 0x6f, 0x31, 0xb2, 0xec, 0x0e, 0x50, 0xaf, 0xf1, 0x13, 0x4d, 0xce, 0x90, 0x72, 0x2c, 0x6d, 0x33, 0xd1, 0x8f, 0x0c, 0x52, 0xb0, 0xee, 0x32, 0x6c, 0x8e, 0xd0, 0x53, 0x0d, 0xef, 0xb1, 0xf0, 0xae, 0x4c, 0x12, 0x91, 0xcf, 0x2d, 0x73, 0xca, 0x94, 0x76, 0x28, 0xab, 0xf5, 0x17, 0x49, 0x08, 0x56, 0xb4, 0xea, 0x69, 0x37, 0xd5, 0x8b, 0x57, 0x09, 0xeb, 0xb5, 0x36, 0x68, 0x8a, 0xd4, 0x95, 0xcb, 0x29, 0x77, 0xf4, 0xaa, 0x48, 0x16, 0xe9, 0xb7, 0x55, 0x0b, 0x88, 0xd6, 0x34, 0x6a, 0x2b, 0x75, 0x97, 0xc9, 0x4a, 0x14, 0xf6, 0xa8, 0x74, 0x2a, 0xc8, 0x96, 0x15, 0x4b, 0xa9, 0xf7, 0xb6, 0xe8, 0x0a, 0x54, 0xd7, 0x89, 0x6b, 0x35];
+
+if (typeof Int32Array !== 'undefined') TABLE = new Int32Array(TABLE);
+
+var crc81wire = (0, _define_crc2.default)('dallas-1-wire', function (buf, previous) {
+  if (!_buffer.Buffer.isBuffer(buf)) buf = (0, _create_buffer2.default)(buf);
+
+  var crc = ~~previous;
+
+  for (var index = 0; index < buf.length; index++) {
+    var byte = buf[index];
+    crc = TABLE[(crc ^ byte) & 0xff] & 0xff;
+  }
+
+  return crc;
+});
+
+exports.default = crc81wire;
+
+},{"./create_buffer":28,"./define_crc":29,"buffer":4}],27:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _buffer = require('buffer');
+
+var _create_buffer = require('./create_buffer');
+
+var _create_buffer2 = _interopRequireDefault(_create_buffer);
+
+var _define_crc = require('./define_crc');
+
+var _define_crc2 = _interopRequireDefault(_define_crc);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+// Generated by `./pycrc.py --algorithm=table-driven --model=jam --generate=c`
+// prettier-ignore
+var TABLE = [0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f, 0xe963a535, 0x9e6495a3, 0x0edb8832, 0x79dcb8a4, 0xe0d5e91e, 0x97d2d988, 0x09b64c2b, 0x7eb17cbd, 0xe7b82d07, 0x90bf1d91, 0x1db71064, 0x6ab020f2, 0xf3b97148, 0x84be41de, 0x1adad47d, 0x6ddde4eb, 0xf4d4b551, 0x83d385c7, 0x136c9856, 0x646ba8c0, 0xfd62f97a, 0x8a65c9ec, 0x14015c4f, 0x63066cd9, 0xfa0f3d63, 0x8d080df5, 0x3b6e20c8, 0x4c69105e, 0xd56041e4, 0xa2677172, 0x3c03e4d1, 0x4b04d447, 0xd20d85fd, 0xa50ab56b, 0x35b5a8fa, 0x42b2986c, 0xdbbbc9d6, 0xacbcf940, 0x32d86ce3, 0x45df5c75, 0xdcd60dcf, 0xabd13d59, 0x26d930ac, 0x51de003a, 0xc8d75180, 0xbfd06116, 0x21b4f4b5, 0x56b3c423, 0xcfba9599, 0xb8bda50f, 0x2802b89e, 0x5f058808, 0xc60cd9b2, 0xb10be924, 0x2f6f7c87, 0x58684c11, 0xc1611dab, 0xb6662d3d, 0x76dc4190, 0x01db7106, 0x98d220bc, 0xefd5102a, 0x71b18589, 0x06b6b51f, 0x9fbfe4a5, 0xe8b8d433, 0x7807c9a2, 0x0f00f934, 0x9609a88e, 0xe10e9818, 0x7f6a0dbb, 0x086d3d2d, 0x91646c97, 0xe6635c01, 0x6b6b51f4, 0x1c6c6162, 0x856530d8, 0xf262004e, 0x6c0695ed, 0x1b01a57b, 0x8208f4c1, 0xf50fc457, 0x65b0d9c6, 0x12b7e950, 0x8bbeb8ea, 0xfcb9887c, 0x62dd1ddf, 0x15da2d49, 0x8cd37cf3, 0xfbd44c65, 0x4db26158, 0x3ab551ce, 0xa3bc0074, 0xd4bb30e2, 0x4adfa541, 0x3dd895d7, 0xa4d1c46d, 0xd3d6f4fb, 0x4369e96a, 0x346ed9fc, 0xad678846, 0xda60b8d0, 0x44042d73, 0x33031de5, 0xaa0a4c5f, 0xdd0d7cc9, 0x5005713c, 0x270241aa, 0xbe0b1010, 0xc90c2086, 0x5768b525, 0x206f85b3, 0xb966d409, 0xce61e49f, 0x5edef90e, 0x29d9c998, 0xb0d09822, 0xc7d7a8b4, 0x59b33d17, 0x2eb40d81, 0xb7bd5c3b, 0xc0ba6cad, 0xedb88320, 0x9abfb3b6, 0x03b6e20c, 0x74b1d29a, 0xead54739, 0x9dd277af, 0x04db2615, 0x73dc1683, 0xe3630b12, 0x94643b84, 0x0d6d6a3e, 0x7a6a5aa8, 0xe40ecf0b, 0x9309ff9d, 0x0a00ae27, 0x7d079eb1, 0xf00f9344, 0x8708a3d2, 0x1e01f268, 0x6906c2fe, 0xf762575d, 0x806567cb, 0x196c3671, 0x6e6b06e7, 0xfed41b76, 0x89d32be0, 0x10da7a5a, 0x67dd4acc, 0xf9b9df6f, 0x8ebeeff9, 0x17b7be43, 0x60b08ed5, 0xd6d6a3e8, 0xa1d1937e, 0x38d8c2c4, 0x4fdff252, 0xd1bb67f1, 0xa6bc5767, 0x3fb506dd, 0x48b2364b, 0xd80d2bda, 0xaf0a1b4c, 0x36034af6, 0x41047a60, 0xdf60efc3, 0xa867df55, 0x316e8eef, 0x4669be79, 0xcb61b38c, 0xbc66831a, 0x256fd2a0, 0x5268e236, 0xcc0c7795, 0xbb0b4703, 0x220216b9, 0x5505262f, 0xc5ba3bbe, 0xb2bd0b28, 0x2bb45a92, 0x5cb36a04, 0xc2d7ffa7, 0xb5d0cf31, 0x2cd99e8b, 0x5bdeae1d, 0x9b64c2b0, 0xec63f226, 0x756aa39c, 0x026d930a, 0x9c0906a9, 0xeb0e363f, 0x72076785, 0x05005713, 0x95bf4a82, 0xe2b87a14, 0x7bb12bae, 0x0cb61b38, 0x92d28e9b, 0xe5d5be0d, 0x7cdcefb7, 0x0bdbdf21, 0x86d3d2d4, 0xf1d4e242, 0x68ddb3f8, 0x1fda836e, 0x81be16cd, 0xf6b9265b, 0x6fb077e1, 0x18b74777, 0x88085ae6, 0xff0f6a70, 0x66063bca, 0x11010b5c, 0x8f659eff, 0xf862ae69, 0x616bffd3, 0x166ccf45, 0xa00ae278, 0xd70dd2ee, 0x4e048354, 0x3903b3c2, 0xa7672661, 0xd06016f7, 0x4969474d, 0x3e6e77db, 0xaed16a4a, 0xd9d65adc, 0x40df0b66, 0x37d83bf0, 0xa9bcae53, 0xdebb9ec5, 0x47b2cf7f, 0x30b5ffe9, 0xbdbdf21c, 0xcabac28a, 0x53b39330, 0x24b4a3a6, 0xbad03605, 0xcdd70693, 0x54de5729, 0x23d967bf, 0xb3667a2e, 0xc4614ab8, 0x5d681b02, 0x2a6f2b94, 0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d];
+
+if (typeof Int32Array !== 'undefined') TABLE = new Int32Array(TABLE);
+
+var crcjam = (0, _define_crc2.default)('jam', function (buf) {
+  var previous = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : -1;
+
+  if (!_buffer.Buffer.isBuffer(buf)) buf = (0, _create_buffer2.default)(buf);
+
+  var crc = previous === 0 ? 0 : ~~previous;
+
+  for (var index = 0; index < buf.length; index++) {
+    var byte = buf[index];
+    crc = TABLE[(crc ^ byte) & 0xff] ^ crc >>> 8;
+  }
+
+  return crc;
+});
+
+exports.default = crcjam;
+
+},{"./create_buffer":28,"./define_crc":29,"buffer":4}],28:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _buffer = require('buffer');
+
+var createBuffer = _buffer.Buffer.from && _buffer.Buffer.alloc && _buffer.Buffer.allocUnsafe && _buffer.Buffer.allocUnsafeSlow ? _buffer.Buffer.from : // support for Node < 5.10
+function (val) {
+  return new _buffer.Buffer(val);
+};
+
+exports.default = createBuffer;
+
+},{"buffer":4}],29:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+exports.default = function (model, calc) {
+  var fn = function fn(buf, previous) {
+    return calc(buf, previous) >>> 0;
+  };
+  fn.signed = calc;
+  fn.unsigned = fn;
+  fn.model = model;
+
+  return fn;
+};
+
+},{}],30:[function(require,module,exports){
+'use strict';
+
+module.exports = {
+  crc1: require('./crc1'),
+  crc8: require('./crc8'),
+  crc81wire: require('./crc8_1wire'),
+  crc16: require('./crc16'),
+  crc16ccitt: require('./crc16_ccitt'),
+  crc16modbus: require('./crc16_modbus'),
+  crc16xmodem: require('./crc16_xmodem'),
+  crc16kermit: require('./crc16_kermit'),
+  crc24: require('./crc24'),
+  crc32: require('./crc32'),
+  crcjam: require('./crcjam')
+};
+
+},{"./crc1":6,"./crc16":7,"./crc16_ccitt":8,"./crc16_kermit":9,"./crc16_modbus":10,"./crc16_xmodem":11,"./crc24":12,"./crc32":13,"./crc8":14,"./crc8_1wire":15,"./crcjam":16}],31:[function(require,module,exports){
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m
   var eLen = (nBytes * 8) - mLen - 1
@@ -2163,38 +5210,2836 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128
 }
 
-},{}],5:[function(require,module,exports){
+},{}],32:[function(require,module,exports){
+(function (process,global){(function (){
+/*
+ * [js-sha512]{@link https://github.com/emn178/js-sha512}
+ *
+ * @version 0.8.0
+ * @author Chen, Yi-Cyuan [emn178@gmail.com]
+ * @copyright Chen, Yi-Cyuan 2014-2018
+ * @license MIT
+ */
+/*jslint bitwise: true */
+(function () {
+  'use strict';
+
+  var INPUT_ERROR = 'input is invalid type';
+  var FINALIZE_ERROR = 'finalize already called';
+  var WINDOW = typeof window === 'object';
+  var root = WINDOW ? window : {};
+  if (root.JS_SHA512_NO_WINDOW) {
+    WINDOW = false;
+  }
+  var WEB_WORKER = !WINDOW && typeof self === 'object';
+  var NODE_JS = !root.JS_SHA512_NO_NODE_JS && typeof process === 'object' && process.versions && process.versions.node;
+  if (NODE_JS) {
+    root = global;
+  } else if (WEB_WORKER) {
+    root = self;
+  }
+  var COMMON_JS = !root.JS_SHA512_NO_COMMON_JS && typeof module === 'object' && module.exports;
+  var AMD = typeof define === 'function' && define.amd;
+  var ARRAY_BUFFER = !root.JS_SHA512_NO_ARRAY_BUFFER && typeof ArrayBuffer !== 'undefined';
+  var HEX_CHARS = '0123456789abcdef'.split('');
+  var EXTRA = [-2147483648, 8388608, 32768, 128];
+  var SHIFT = [24, 16, 8, 0];
+  var K = [
+    0x428A2F98, 0xD728AE22, 0x71374491, 0x23EF65CD,
+    0xB5C0FBCF, 0xEC4D3B2F, 0xE9B5DBA5, 0x8189DBBC,
+    0x3956C25B, 0xF348B538, 0x59F111F1, 0xB605D019,
+    0x923F82A4, 0xAF194F9B, 0xAB1C5ED5, 0xDA6D8118,
+    0xD807AA98, 0xA3030242, 0x12835B01, 0x45706FBE,
+    0x243185BE, 0x4EE4B28C, 0x550C7DC3, 0xD5FFB4E2,
+    0x72BE5D74, 0xF27B896F, 0x80DEB1FE, 0x3B1696B1,
+    0x9BDC06A7, 0x25C71235, 0xC19BF174, 0xCF692694,
+    0xE49B69C1, 0x9EF14AD2, 0xEFBE4786, 0x384F25E3,
+    0x0FC19DC6, 0x8B8CD5B5, 0x240CA1CC, 0x77AC9C65,
+    0x2DE92C6F, 0x592B0275, 0x4A7484AA, 0x6EA6E483,
+    0x5CB0A9DC, 0xBD41FBD4, 0x76F988DA, 0x831153B5,
+    0x983E5152, 0xEE66DFAB, 0xA831C66D, 0x2DB43210,
+    0xB00327C8, 0x98FB213F, 0xBF597FC7, 0xBEEF0EE4,
+    0xC6E00BF3, 0x3DA88FC2, 0xD5A79147, 0x930AA725,
+    0x06CA6351, 0xE003826F, 0x14292967, 0x0A0E6E70,
+    0x27B70A85, 0x46D22FFC, 0x2E1B2138, 0x5C26C926,
+    0x4D2C6DFC, 0x5AC42AED, 0x53380D13, 0x9D95B3DF,
+    0x650A7354, 0x8BAF63DE, 0x766A0ABB, 0x3C77B2A8,
+    0x81C2C92E, 0x47EDAEE6, 0x92722C85, 0x1482353B,
+    0xA2BFE8A1, 0x4CF10364, 0xA81A664B, 0xBC423001,
+    0xC24B8B70, 0xD0F89791, 0xC76C51A3, 0x0654BE30,
+    0xD192E819, 0xD6EF5218, 0xD6990624, 0x5565A910,
+    0xF40E3585, 0x5771202A, 0x106AA070, 0x32BBD1B8,
+    0x19A4C116, 0xB8D2D0C8, 0x1E376C08, 0x5141AB53,
+    0x2748774C, 0xDF8EEB99, 0x34B0BCB5, 0xE19B48A8,
+    0x391C0CB3, 0xC5C95A63, 0x4ED8AA4A, 0xE3418ACB,
+    0x5B9CCA4F, 0x7763E373, 0x682E6FF3, 0xD6B2B8A3,
+    0x748F82EE, 0x5DEFB2FC, 0x78A5636F, 0x43172F60,
+    0x84C87814, 0xA1F0AB72, 0x8CC70208, 0x1A6439EC,
+    0x90BEFFFA, 0x23631E28, 0xA4506CEB, 0xDE82BDE9,
+    0xBEF9A3F7, 0xB2C67915, 0xC67178F2, 0xE372532B,
+    0xCA273ECE, 0xEA26619C, 0xD186B8C7, 0x21C0C207,
+    0xEADA7DD6, 0xCDE0EB1E, 0xF57D4F7F, 0xEE6ED178,
+    0x06F067AA, 0x72176FBA, 0x0A637DC5, 0xA2C898A6,
+    0x113F9804, 0xBEF90DAE, 0x1B710B35, 0x131C471B,
+    0x28DB77F5, 0x23047D84, 0x32CAAB7B, 0x40C72493,
+    0x3C9EBE0A, 0x15C9BEBC, 0x431D67C4, 0x9C100D4C,
+    0x4CC5D4BE, 0xCB3E42B6, 0x597F299C, 0xFC657E2A,
+    0x5FCB6FAB, 0x3AD6FAEC, 0x6C44198C, 0x4A475817
+  ];
+
+  var OUTPUT_TYPES = ['hex', 'array', 'digest', 'arrayBuffer'];
+
+  var blocks = [];
+
+  if (root.JS_SHA512_NO_NODE_JS || !Array.isArray) {
+    Array.isArray = function (obj) {
+      return Object.prototype.toString.call(obj) === '[object Array]';
+    };
+  }
+
+  if (ARRAY_BUFFER && (root.JS_SHA512_NO_ARRAY_BUFFER_IS_VIEW || !ArrayBuffer.isView)) {
+    ArrayBuffer.isView = function (obj) {
+      return typeof obj === 'object' && obj.buffer && obj.buffer.constructor === ArrayBuffer;
+    };
+  }
+
+  var createOutputMethod = function (outputType, bits) {
+    return function (message) {
+      return new Sha512(bits, true).update(message)[outputType]();
+    };
+  };
+
+  var createMethod = function (bits) {
+    var method = createOutputMethod('hex', bits);
+    method.create = function () {
+      return new Sha512(bits);
+    };
+    method.update = function (message) {
+      return method.create().update(message);
+    };
+    for (var i = 0; i < OUTPUT_TYPES.length; ++i) {
+      var type = OUTPUT_TYPES[i];
+      method[type] = createOutputMethod(type, bits);
+    }
+    return method;
+  };
+
+  var createHmacOutputMethod = function (outputType, bits) {
+    return function (key, message) {
+      return new HmacSha512(key, bits, true).update(message)[outputType]();
+    };
+  };
+
+  var createHmacMethod = function (bits) {
+    var method = createHmacOutputMethod('hex', bits);
+    method.create = function (key) {
+      return new HmacSha512(key, bits);
+    };
+    method.update = function (key, message) {
+      return method.create(key).update(message);
+    };
+    for (var i = 0; i < OUTPUT_TYPES.length; ++i) {
+      var type = OUTPUT_TYPES[i];
+      method[type] = createHmacOutputMethod(type, bits);
+    }
+    return method;
+  };
+
+  function Sha512(bits, sharedMemory) {
+    if (sharedMemory) {
+      blocks[0] = blocks[1] = blocks[2] = blocks[3] = blocks[4] =
+      blocks[5] = blocks[6] = blocks[7] = blocks[8] =
+      blocks[9] = blocks[10] = blocks[11] = blocks[12] =
+      blocks[13] = blocks[14] = blocks[15] = blocks[16] =
+      blocks[17] = blocks[18] = blocks[19] = blocks[20] =
+      blocks[21] = blocks[22] = blocks[23] = blocks[24] =
+      blocks[25] = blocks[26] = blocks[27] = blocks[28] =
+      blocks[29] = blocks[30] = blocks[31] = blocks[32] = 0;
+      this.blocks = blocks;
+    } else {
+      this.blocks = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    }
+
+    if (bits == 384) {
+      this.h0h = 0xCBBB9D5D;
+      this.h0l = 0xC1059ED8;
+      this.h1h = 0x629A292A;
+      this.h1l = 0x367CD507;
+      this.h2h = 0x9159015A;
+      this.h2l = 0x3070DD17;
+      this.h3h = 0x152FECD8;
+      this.h3l = 0xF70E5939;
+      this.h4h = 0x67332667;
+      this.h4l = 0xFFC00B31;
+      this.h5h = 0x8EB44A87;
+      this.h5l = 0x68581511;
+      this.h6h = 0xDB0C2E0D;
+      this.h6l = 0x64F98FA7;
+      this.h7h = 0x47B5481D;
+      this.h7l = 0xBEFA4FA4;
+    } else if (bits == 256) {
+      this.h0h = 0x22312194;
+      this.h0l = 0xFC2BF72C;
+      this.h1h = 0x9F555FA3;
+      this.h1l = 0xC84C64C2;
+      this.h2h = 0x2393B86B;
+      this.h2l = 0x6F53B151;
+      this.h3h = 0x96387719;
+      this.h3l = 0x5940EABD;
+      this.h4h = 0x96283EE2;
+      this.h4l = 0xA88EFFE3;
+      this.h5h = 0xBE5E1E25;
+      this.h5l = 0x53863992;
+      this.h6h = 0x2B0199FC;
+      this.h6l = 0x2C85B8AA;
+      this.h7h = 0x0EB72DDC;
+      this.h7l = 0x81C52CA2;
+    } else if (bits == 224) {
+      this.h0h = 0x8C3D37C8;
+      this.h0l = 0x19544DA2;
+      this.h1h = 0x73E19966;
+      this.h1l = 0x89DCD4D6;
+      this.h2h = 0x1DFAB7AE;
+      this.h2l = 0x32FF9C82;
+      this.h3h = 0x679DD514;
+      this.h3l = 0x582F9FCF;
+      this.h4h = 0x0F6D2B69;
+      this.h4l = 0x7BD44DA8;
+      this.h5h = 0x77E36F73;
+      this.h5l = 0x04C48942;
+      this.h6h = 0x3F9D85A8;
+      this.h6l = 0x6A1D36C8;
+      this.h7h = 0x1112E6AD;
+      this.h7l = 0x91D692A1;
+    } else { // 512
+      this.h0h = 0x6A09E667;
+      this.h0l = 0xF3BCC908;
+      this.h1h = 0xBB67AE85;
+      this.h1l = 0x84CAA73B;
+      this.h2h = 0x3C6EF372;
+      this.h2l = 0xFE94F82B;
+      this.h3h = 0xA54FF53A;
+      this.h3l = 0x5F1D36F1;
+      this.h4h = 0x510E527F;
+      this.h4l = 0xADE682D1;
+      this.h5h = 0x9B05688C;
+      this.h5l = 0x2B3E6C1F;
+      this.h6h = 0x1F83D9AB;
+      this.h6l = 0xFB41BD6B;
+      this.h7h = 0x5BE0CD19;
+      this.h7l = 0x137E2179;
+    }
+    this.bits = bits;
+
+    this.block = this.start = this.bytes = this.hBytes = 0;
+    this.finalized = this.hashed = false;
+  }
+
+  Sha512.prototype.update = function (message) {
+    if (this.finalized) {
+      throw new Error(FINALIZE_ERROR);
+    }
+    var notString, type = typeof message;
+    if (type !== 'string') {
+      if (type === 'object') {
+        if (message === null) {
+          throw new Error(INPUT_ERROR);
+        } else if (ARRAY_BUFFER && message.constructor === ArrayBuffer) {
+          message = new Uint8Array(message);
+        } else if (!Array.isArray(message)) {
+          if (!ARRAY_BUFFER || !ArrayBuffer.isView(message)) {
+            throw new Error(INPUT_ERROR);
+          }
+        }
+      } else {
+        throw new Error(INPUT_ERROR);
+      }
+      notString = true;
+    }
+    var code, index = 0, i, length = message.length, blocks = this.blocks;
+
+    while (index < length) {
+      if (this.hashed) {
+        this.hashed = false;
+        blocks[0] = this.block;
+        blocks[1] = blocks[2] = blocks[3] = blocks[4] =
+        blocks[5] = blocks[6] = blocks[7] = blocks[8] =
+        blocks[9] = blocks[10] = blocks[11] = blocks[12] =
+        blocks[13] = blocks[14] = blocks[15] = blocks[16] =
+        blocks[17] = blocks[18] = blocks[19] = blocks[20] =
+        blocks[21] = blocks[22] = blocks[23] = blocks[24] =
+        blocks[25] = blocks[26] = blocks[27] = blocks[28] =
+        blocks[29] = blocks[30] = blocks[31] = blocks[32] = 0;
+      }
+
+      if(notString) {
+        for (i = this.start; index < length && i < 128; ++index) {
+          blocks[i >> 2] |= message[index] << SHIFT[i++ & 3];
+        }
+      } else {
+        for (i = this.start; index < length && i < 128; ++index) {
+          code = message.charCodeAt(index);
+          if (code < 0x80) {
+            blocks[i >> 2] |= code << SHIFT[i++ & 3];
+          } else if (code < 0x800) {
+            blocks[i >> 2] |= (0xc0 | (code >> 6)) << SHIFT[i++ & 3];
+            blocks[i >> 2] |= (0x80 | (code & 0x3f)) << SHIFT[i++ & 3];
+          } else if (code < 0xd800 || code >= 0xe000) {
+            blocks[i >> 2] |= (0xe0 | (code >> 12)) << SHIFT[i++ & 3];
+            blocks[i >> 2] |= (0x80 | ((code >> 6) & 0x3f)) << SHIFT[i++ & 3];
+            blocks[i >> 2] |= (0x80 | (code & 0x3f)) << SHIFT[i++ & 3];
+          } else {
+            code = 0x10000 + (((code & 0x3ff) << 10) | (message.charCodeAt(++index) & 0x3ff));
+            blocks[i >> 2] |= (0xf0 | (code >> 18)) << SHIFT[i++ & 3];
+            blocks[i >> 2] |= (0x80 | ((code >> 12) & 0x3f)) << SHIFT[i++ & 3];
+            blocks[i >> 2] |= (0x80 | ((code >> 6) & 0x3f)) << SHIFT[i++ & 3];
+            blocks[i >> 2] |= (0x80 | (code & 0x3f)) << SHIFT[i++ & 3];
+          }
+        }
+      }
+
+      this.lastByteIndex = i;
+      this.bytes += i - this.start;
+      if (i >= 128) {
+        this.block = blocks[32];
+        this.start = i - 128;
+        this.hash();
+        this.hashed = true;
+      } else {
+        this.start = i;
+      }
+    }
+    if (this.bytes > 4294967295) {
+      this.hBytes += this.bytes / 4294967296 << 0;
+      this.bytes = this.bytes % 4294967296;
+    }
+    return this;
+  };
+
+  Sha512.prototype.finalize = function () {
+    if (this.finalized) {
+      return;
+    }
+    this.finalized = true;
+    var blocks = this.blocks, i = this.lastByteIndex;
+    blocks[32] = this.block;
+    blocks[i >> 2] |= EXTRA[i & 3];
+    this.block = blocks[32];
+    if (i >= 112) {
+      if (!this.hashed) {
+        this.hash();
+      }
+      blocks[0] = this.block;
+      blocks[1] = blocks[2] = blocks[3] = blocks[4] =
+      blocks[5] = blocks[6] = blocks[7] = blocks[8] =
+      blocks[9] = blocks[10] = blocks[11] = blocks[12] =
+      blocks[13] = blocks[14] = blocks[15] = blocks[16] =
+      blocks[17] = blocks[18] = blocks[19] = blocks[20] =
+      blocks[21] = blocks[22] = blocks[23] = blocks[24] =
+      blocks[25] = blocks[26] = blocks[27] = blocks[28] =
+      blocks[29] = blocks[30] = blocks[31] = blocks[32] = 0;
+    }
+    blocks[30] = this.hBytes << 3 | this.bytes >>> 29;
+    blocks[31] = this.bytes << 3;
+    this.hash();
+  };
+
+  Sha512.prototype.hash = function () {
+    var h0h = this.h0h, h0l = this.h0l, h1h = this.h1h, h1l = this.h1l,
+      h2h = this.h2h, h2l = this.h2l, h3h = this.h3h, h3l = this.h3l,
+      h4h = this.h4h, h4l = this.h4l, h5h = this.h5h, h5l = this.h5l,
+      h6h = this.h6h, h6l = this.h6l, h7h = this.h7h, h7l = this.h7l,
+      blocks = this.blocks, j, s0h, s0l, s1h, s1l, c1, c2, c3, c4,
+      abh, abl, dah, dal, cdh, cdl, bch, bcl,
+      majh, majl, t1h, t1l, t2h, t2l, chh, chl;
+
+    for (j = 32; j < 160; j += 2) {
+      t1h = blocks[j - 30];
+      t1l = blocks[j - 29];
+      s0h = ((t1h >>> 1) | (t1l << 31)) ^ ((t1h >>> 8) | (t1l << 24)) ^ (t1h >>> 7);
+      s0l = ((t1l >>> 1) | (t1h << 31)) ^ ((t1l >>> 8) | (t1h << 24)) ^ ((t1l >>> 7) | t1h << 25);
+
+      t1h = blocks[j - 4];
+      t1l = blocks[j - 3];
+      s1h = ((t1h >>> 19) | (t1l << 13)) ^ ((t1l >>> 29) | (t1h << 3)) ^ (t1h >>> 6);
+      s1l = ((t1l >>> 19) | (t1h << 13)) ^ ((t1h >>> 29) | (t1l << 3)) ^ ((t1l >>> 6) | t1h << 26);
+
+      t1h = blocks[j - 32];
+      t1l = blocks[j - 31];
+      t2h = blocks[j - 14];
+      t2l = blocks[j - 13];
+
+      c1 = (t2l & 0xFFFF) + (t1l & 0xFFFF) + (s0l & 0xFFFF) + (s1l & 0xFFFF);
+      c2 = (t2l >>> 16) + (t1l >>> 16) + (s0l >>> 16) + (s1l >>> 16) + (c1 >>> 16);
+      c3 = (t2h & 0xFFFF) + (t1h & 0xFFFF) + (s0h & 0xFFFF) + (s1h & 0xFFFF) + (c2 >>> 16);
+      c4 = (t2h >>> 16) + (t1h >>> 16) + (s0h >>> 16) + (s1h >>> 16) + (c3 >>> 16);
+
+      blocks[j] = (c4 << 16) | (c3 & 0xFFFF);
+      blocks[j + 1] = (c2 << 16) | (c1 & 0xFFFF);
+    }
+
+    var ah = h0h, al = h0l, bh = h1h, bl = h1l, ch = h2h, cl = h2l, dh = h3h, dl = h3l, eh = h4h, el = h4l, fh = h5h, fl = h5l, gh = h6h, gl = h6l, hh = h7h, hl = h7l;
+    bch = bh & ch;
+    bcl = bl & cl;
+    for (j = 0; j < 160; j += 8) {
+      s0h = ((ah >>> 28) | (al << 4)) ^ ((al >>> 2) | (ah << 30)) ^ ((al >>> 7) | (ah << 25));
+      s0l = ((al >>> 28) | (ah << 4)) ^ ((ah >>> 2) | (al << 30)) ^ ((ah >>> 7) | (al << 25));
+
+      s1h = ((eh >>> 14) | (el << 18)) ^ ((eh >>> 18) | (el << 14)) ^ ((el >>> 9) | (eh << 23));
+      s1l = ((el >>> 14) | (eh << 18)) ^ ((el >>> 18) | (eh << 14)) ^ ((eh >>> 9) | (el << 23));
+
+      abh = ah & bh;
+      abl = al & bl;
+      majh = abh ^ (ah & ch) ^ bch;
+      majl = abl ^ (al & cl) ^ bcl;
+
+      chh = (eh & fh) ^ (~eh & gh);
+      chl = (el & fl) ^ (~el & gl);
+
+      t1h = blocks[j];
+      t1l = blocks[j + 1];
+      t2h = K[j];
+      t2l = K[j + 1];
+
+      c1 = (t2l & 0xFFFF) + (t1l & 0xFFFF) + (chl & 0xFFFF) + (s1l & 0xFFFF) + (hl & 0xFFFF);
+      c2 = (t2l >>> 16) + (t1l >>> 16) + (chl >>> 16) + (s1l >>> 16) + (hl >>> 16) + (c1 >>> 16);
+      c3 = (t2h & 0xFFFF) + (t1h & 0xFFFF) + (chh & 0xFFFF) + (s1h & 0xFFFF) + (hh & 0xFFFF) + (c2 >>> 16);
+      c4 = (t2h >>> 16) + (t1h >>> 16) + (chh >>> 16) + (s1h >>> 16) + (hh >>> 16) + (c3 >>> 16);
+
+      t1h = (c4 << 16) | (c3 & 0xFFFF);
+      t1l = (c2 << 16) | (c1 & 0xFFFF);
+
+      c1 = (majl & 0xFFFF) + (s0l & 0xFFFF);
+      c2 = (majl >>> 16) + (s0l >>> 16) + (c1 >>> 16);
+      c3 = (majh & 0xFFFF) + (s0h & 0xFFFF) + (c2 >>> 16);
+      c4 = (majh >>> 16) + (s0h >>> 16) + (c3 >>> 16);
+
+      t2h = (c4 << 16) | (c3 & 0xFFFF);
+      t2l = (c2 << 16) | (c1 & 0xFFFF);
+
+      c1 = (dl & 0xFFFF) + (t1l & 0xFFFF);
+      c2 = (dl >>> 16) + (t1l >>> 16) + (c1 >>> 16);
+      c3 = (dh & 0xFFFF) + (t1h & 0xFFFF) + (c2 >>> 16);
+      c4 = (dh >>> 16) + (t1h >>> 16) + (c3 >>> 16);
+
+      hh = (c4 << 16) | (c3 & 0xFFFF);
+      hl = (c2 << 16) | (c1 & 0xFFFF);
+
+      c1 = (t2l & 0xFFFF) + (t1l & 0xFFFF);
+      c2 = (t2l >>> 16) + (t1l >>> 16) + (c1 >>> 16);
+      c3 = (t2h & 0xFFFF) + (t1h & 0xFFFF) + (c2 >>> 16);
+      c4 = (t2h >>> 16) + (t1h >>> 16) + (c3 >>> 16);
+
+      dh = (c4 << 16) | (c3 & 0xFFFF);
+      dl = (c2 << 16) | (c1 & 0xFFFF);
+
+      s0h = ((dh >>> 28) | (dl << 4)) ^ ((dl >>> 2) | (dh << 30)) ^ ((dl >>> 7) | (dh << 25));
+      s0l = ((dl >>> 28) | (dh << 4)) ^ ((dh >>> 2) | (dl << 30)) ^ ((dh >>> 7) | (dl << 25));
+
+      s1h = ((hh >>> 14) | (hl << 18)) ^ ((hh >>> 18) | (hl << 14)) ^ ((hl >>> 9) | (hh << 23));
+      s1l = ((hl >>> 14) | (hh << 18)) ^ ((hl >>> 18) | (hh << 14)) ^ ((hh >>> 9) | (hl << 23));
+
+      dah = dh & ah;
+      dal = dl & al;
+      majh = dah ^ (dh & bh) ^ abh;
+      majl = dal ^ (dl & bl) ^ abl;
+
+      chh = (hh & eh) ^ (~hh & fh);
+      chl = (hl & el) ^ (~hl & fl);
+
+      t1h = blocks[j + 2];
+      t1l = blocks[j + 3];
+      t2h = K[j + 2];
+      t2l = K[j + 3];
+
+      c1 = (t2l & 0xFFFF) + (t1l & 0xFFFF) + (chl & 0xFFFF) + (s1l & 0xFFFF) + (gl & 0xFFFF);
+      c2 = (t2l >>> 16) + (t1l >>> 16) + (chl >>> 16) + (s1l >>> 16) + (gl >>> 16) + (c1 >>> 16);
+      c3 = (t2h & 0xFFFF) + (t1h & 0xFFFF) + (chh & 0xFFFF) + (s1h & 0xFFFF) + (gh & 0xFFFF) + (c2 >>> 16);
+      c4 = (t2h >>> 16) + (t1h >>> 16) + (chh >>> 16) + (s1h >>> 16) + (gh >>> 16) + (c3 >>> 16);
+
+      t1h = (c4 << 16) | (c3 & 0xFFFF);
+      t1l = (c2 << 16) | (c1 & 0xFFFF);
+
+      c1 = (majl & 0xFFFF) + (s0l & 0xFFFF);
+      c2 = (majl >>> 16) + (s0l >>> 16) + (c1 >>> 16);
+      c3 = (majh & 0xFFFF) + (s0h & 0xFFFF) + (c2 >>> 16);
+      c4 = (majh >>> 16) + (s0h >>> 16) + (c3 >>> 16);
+
+      t2h = (c4 << 16) | (c3 & 0xFFFF);
+      t2l = (c2 << 16) | (c1 & 0xFFFF);
+
+      c1 = (cl & 0xFFFF) + (t1l & 0xFFFF);
+      c2 = (cl >>> 16) + (t1l >>> 16) + (c1 >>> 16);
+      c3 = (ch & 0xFFFF) + (t1h & 0xFFFF) + (c2 >>> 16);
+      c4 = (ch >>> 16) + (t1h >>> 16) + (c3 >>> 16);
+
+      gh = (c4 << 16) | (c3 & 0xFFFF);
+      gl = (c2 << 16) | (c1 & 0xFFFF);
+
+      c1 = (t2l & 0xFFFF) + (t1l & 0xFFFF);
+      c2 = (t2l >>> 16) + (t1l >>> 16) + (c1 >>> 16);
+      c3 = (t2h & 0xFFFF) + (t1h & 0xFFFF) + (c2 >>> 16);
+      c4 = (t2h >>> 16) + (t1h >>> 16) + (c3 >>> 16);
+
+      ch = (c4 << 16) | (c3 & 0xFFFF);
+      cl = (c2 << 16) | (c1 & 0xFFFF);
+
+      s0h = ((ch >>> 28) | (cl << 4)) ^ ((cl >>> 2) | (ch << 30)) ^ ((cl >>> 7) | (ch << 25));
+      s0l = ((cl >>> 28) | (ch << 4)) ^ ((ch >>> 2) | (cl << 30)) ^ ((ch >>> 7) | (cl << 25));
+
+      s1h = ((gh >>> 14) | (gl << 18)) ^ ((gh >>> 18) | (gl << 14)) ^ ((gl >>> 9) | (gh << 23));
+      s1l = ((gl >>> 14) | (gh << 18)) ^ ((gl >>> 18) | (gh << 14)) ^ ((gh >>> 9) | (gl << 23));
+
+      cdh = ch & dh;
+      cdl = cl & dl;
+      majh = cdh ^ (ch & ah) ^ dah;
+      majl = cdl ^ (cl & al) ^ dal;
+
+      chh = (gh & hh) ^ (~gh & eh);
+      chl = (gl & hl) ^ (~gl & el);
+
+      t1h = blocks[j + 4];
+      t1l = blocks[j + 5];
+      t2h = K[j + 4];
+      t2l = K[j + 5];
+
+      c1 = (t2l & 0xFFFF) + (t1l & 0xFFFF) + (chl & 0xFFFF) + (s1l & 0xFFFF) + (fl & 0xFFFF);
+      c2 = (t2l >>> 16) + (t1l >>> 16) + (chl >>> 16) + (s1l >>> 16) + (fl >>> 16) + (c1 >>> 16);
+      c3 = (t2h & 0xFFFF) + (t1h & 0xFFFF) + (chh & 0xFFFF) + (s1h & 0xFFFF) + (fh & 0xFFFF) + (c2 >>> 16);
+      c4 = (t2h >>> 16) + (t1h >>> 16) + (chh >>> 16) + (s1h >>> 16) + (fh >>> 16) + (c3 >>> 16);
+
+      t1h = (c4 << 16) | (c3 & 0xFFFF);
+      t1l = (c2 << 16) | (c1 & 0xFFFF);
+
+      c1 = (majl & 0xFFFF) + (s0l & 0xFFFF);
+      c2 = (majl >>> 16) + (s0l >>> 16) + (c1 >>> 16);
+      c3 = (majh & 0xFFFF) + (s0h & 0xFFFF) + (c2 >>> 16);
+      c4 = (majh >>> 16) + (s0h >>> 16) + (c3 >>> 16);
+
+      t2h = (c4 << 16) | (c3 & 0xFFFF);
+      t2l = (c2 << 16) | (c1 & 0xFFFF);
+
+      c1 = (bl & 0xFFFF) + (t1l & 0xFFFF);
+      c2 = (bl >>> 16) + (t1l >>> 16) + (c1 >>> 16);
+      c3 = (bh & 0xFFFF) + (t1h & 0xFFFF) + (c2 >>> 16);
+      c4 = (bh >>> 16) + (t1h >>> 16) + (c3 >>> 16);
+
+      fh = (c4 << 16) | (c3 & 0xFFFF);
+      fl = (c2 << 16) | (c1 & 0xFFFF);
+
+      c1 = (t2l & 0xFFFF) + (t1l & 0xFFFF);
+      c2 = (t2l >>> 16) + (t1l >>> 16) + (c1 >>> 16);
+      c3 = (t2h & 0xFFFF) + (t1h & 0xFFFF) + (c2 >>> 16);
+      c4 = (t2h >>> 16) + (t1h >>> 16) + (c3 >>> 16);
+
+      bh = (c4 << 16) | (c3 & 0xFFFF);
+      bl = (c2 << 16) | (c1 & 0xFFFF);
+
+      s0h = ((bh >>> 28) | (bl << 4)) ^ ((bl >>> 2) | (bh << 30)) ^ ((bl >>> 7) | (bh << 25));
+      s0l = ((bl >>> 28) | (bh << 4)) ^ ((bh >>> 2) | (bl << 30)) ^ ((bh >>> 7) | (bl << 25));
+
+      s1h = ((fh >>> 14) | (fl << 18)) ^ ((fh >>> 18) | (fl << 14)) ^ ((fl >>> 9) | (fh << 23));
+      s1l = ((fl >>> 14) | (fh << 18)) ^ ((fl >>> 18) | (fh << 14)) ^ ((fh >>> 9) | (fl << 23));
+
+      bch = bh & ch;
+      bcl = bl & cl;
+      majh = bch ^ (bh & dh) ^ cdh;
+      majl = bcl ^ (bl & dl) ^ cdl;
+
+      chh = (fh & gh) ^ (~fh & hh);
+      chl = (fl & gl) ^ (~fl & hl);
+
+      t1h = blocks[j + 6];
+      t1l = blocks[j + 7];
+      t2h = K[j + 6];
+      t2l = K[j + 7];
+
+      c1 = (t2l & 0xFFFF) + (t1l & 0xFFFF) + (chl & 0xFFFF) + (s1l & 0xFFFF) + (el & 0xFFFF);
+      c2 = (t2l >>> 16) + (t1l >>> 16) + (chl >>> 16) + (s1l >>> 16) + (el >>> 16) + (c1 >>> 16);
+      c3 = (t2h & 0xFFFF) + (t1h & 0xFFFF) + (chh & 0xFFFF) + (s1h & 0xFFFF) + (eh & 0xFFFF) + (c2 >>> 16);
+      c4 = (t2h >>> 16) + (t1h >>> 16) + (chh >>> 16) + (s1h >>> 16) + (eh >>> 16) + (c3 >>> 16);
+
+      t1h = (c4 << 16) | (c3 & 0xFFFF);
+      t1l = (c2 << 16) | (c1 & 0xFFFF);
+
+      c1 = (majl & 0xFFFF) + (s0l & 0xFFFF);
+      c2 = (majl >>> 16) + (s0l >>> 16) + (c1 >>> 16);
+      c3 = (majh & 0xFFFF) + (s0h & 0xFFFF) + (c2 >>> 16);
+      c4 = (majh >>> 16) + (s0h >>> 16) + (c3 >>> 16);
+
+      t2h = (c4 << 16) | (c3 & 0xFFFF);
+      t2l = (c2 << 16) | (c1 & 0xFFFF);
+
+      c1 = (al & 0xFFFF) + (t1l & 0xFFFF);
+      c2 = (al >>> 16) + (t1l >>> 16) + (c1 >>> 16);
+      c3 = (ah & 0xFFFF) + (t1h & 0xFFFF) + (c2 >>> 16);
+      c4 = (ah >>> 16) + (t1h >>> 16) + (c3 >>> 16);
+
+      eh = (c4 << 16) | (c3 & 0xFFFF);
+      el = (c2 << 16) | (c1 & 0xFFFF);
+
+      c1 = (t2l & 0xFFFF) + (t1l & 0xFFFF);
+      c2 = (t2l >>> 16) + (t1l >>> 16) + (c1 >>> 16);
+      c3 = (t2h & 0xFFFF) + (t1h & 0xFFFF) + (c2 >>> 16);
+      c4 = (t2h >>> 16) + (t1h >>> 16) + (c3 >>> 16);
+
+      ah = (c4 << 16) | (c3 & 0xFFFF);
+      al = (c2 << 16) | (c1 & 0xFFFF);
+    }
+
+    c1 = (h0l & 0xFFFF) + (al & 0xFFFF);
+    c2 = (h0l >>> 16) + (al >>> 16) + (c1 >>> 16);
+    c3 = (h0h & 0xFFFF) + (ah & 0xFFFF) + (c2 >>> 16);
+    c4 = (h0h >>> 16) + (ah >>> 16) + (c3 >>> 16);
+
+    this.h0h = (c4 << 16) | (c3 & 0xFFFF);
+    this.h0l = (c2 << 16) | (c1 & 0xFFFF);
+
+    c1 = (h1l & 0xFFFF) + (bl & 0xFFFF);
+    c2 = (h1l >>> 16) + (bl >>> 16) + (c1 >>> 16);
+    c3 = (h1h & 0xFFFF) + (bh & 0xFFFF) + (c2 >>> 16);
+    c4 = (h1h >>> 16) + (bh >>> 16) + (c3 >>> 16);
+
+    this.h1h = (c4 << 16) | (c3 & 0xFFFF);
+    this.h1l = (c2 << 16) | (c1 & 0xFFFF);
+
+    c1 = (h2l & 0xFFFF) + (cl & 0xFFFF);
+    c2 = (h2l >>> 16) + (cl >>> 16) + (c1 >>> 16);
+    c3 = (h2h & 0xFFFF) + (ch & 0xFFFF) + (c2 >>> 16);
+    c4 = (h2h >>> 16) + (ch >>> 16) + (c3 >>> 16);
+
+    this.h2h = (c4 << 16) | (c3 & 0xFFFF);
+    this.h2l = (c2 << 16) | (c1 & 0xFFFF);
+
+    c1 = (h3l & 0xFFFF) + (dl & 0xFFFF);
+    c2 = (h3l >>> 16) + (dl >>> 16) + (c1 >>> 16);
+    c3 = (h3h & 0xFFFF) + (dh & 0xFFFF) + (c2 >>> 16);
+    c4 = (h3h >>> 16) + (dh >>> 16) + (c3 >>> 16);
+
+    this.h3h = (c4 << 16) | (c3 & 0xFFFF);
+    this.h3l = (c2 << 16) | (c1 & 0xFFFF);
+
+    c1 = (h4l & 0xFFFF) + (el & 0xFFFF);
+    c2 = (h4l >>> 16) + (el >>> 16) + (c1 >>> 16);
+    c3 = (h4h & 0xFFFF) + (eh & 0xFFFF) + (c2 >>> 16);
+    c4 = (h4h >>> 16) + (eh >>> 16) + (c3 >>> 16);
+
+    this.h4h = (c4 << 16) | (c3 & 0xFFFF);
+    this.h4l = (c2 << 16) | (c1 & 0xFFFF);
+
+    c1 = (h5l & 0xFFFF) + (fl & 0xFFFF);
+    c2 = (h5l >>> 16) + (fl >>> 16) + (c1 >>> 16);
+    c3 = (h5h & 0xFFFF) + (fh & 0xFFFF) + (c2 >>> 16);
+    c4 = (h5h >>> 16) + (fh >>> 16) + (c3 >>> 16);
+
+    this.h5h = (c4 << 16) | (c3 & 0xFFFF);
+    this.h5l = (c2 << 16) | (c1 & 0xFFFF);
+
+    c1 = (h6l & 0xFFFF) + (gl & 0xFFFF);
+    c2 = (h6l >>> 16) + (gl >>> 16) + (c1 >>> 16);
+    c3 = (h6h & 0xFFFF) + (gh & 0xFFFF) + (c2 >>> 16);
+    c4 = (h6h >>> 16) + (gh >>> 16) + (c3 >>> 16);
+
+    this.h6h = (c4 << 16) | (c3 & 0xFFFF);
+    this.h6l = (c2 << 16) | (c1 & 0xFFFF);
+
+    c1 = (h7l & 0xFFFF) + (hl & 0xFFFF);
+    c2 = (h7l >>> 16) + (hl >>> 16) + (c1 >>> 16);
+    c3 = (h7h & 0xFFFF) + (hh & 0xFFFF) + (c2 >>> 16);
+    c4 = (h7h >>> 16) + (hh >>> 16) + (c3 >>> 16);
+
+    this.h7h = (c4 << 16) | (c3 & 0xFFFF);
+    this.h7l = (c2 << 16) | (c1 & 0xFFFF);
+  };
+
+  Sha512.prototype.hex = function () {
+    this.finalize();
+
+    var h0h = this.h0h, h0l = this.h0l, h1h = this.h1h, h1l = this.h1l,
+      h2h = this.h2h, h2l = this.h2l, h3h = this.h3h, h3l = this.h3l,
+      h4h = this.h4h, h4l = this.h4l, h5h = this.h5h, h5l = this.h5l,
+      h6h = this.h6h, h6l = this.h6l, h7h = this.h7h, h7l = this.h7l,
+      bits = this.bits;
+
+    var hex = HEX_CHARS[(h0h >> 28) & 0x0F] + HEX_CHARS[(h0h >> 24) & 0x0F] +
+      HEX_CHARS[(h0h >> 20) & 0x0F] + HEX_CHARS[(h0h >> 16) & 0x0F] +
+      HEX_CHARS[(h0h >> 12) & 0x0F] + HEX_CHARS[(h0h >> 8) & 0x0F] +
+      HEX_CHARS[(h0h >> 4) & 0x0F] + HEX_CHARS[h0h & 0x0F] +
+      HEX_CHARS[(h0l >> 28) & 0x0F] + HEX_CHARS[(h0l >> 24) & 0x0F] +
+      HEX_CHARS[(h0l >> 20) & 0x0F] + HEX_CHARS[(h0l >> 16) & 0x0F] +
+      HEX_CHARS[(h0l >> 12) & 0x0F] + HEX_CHARS[(h0l >> 8) & 0x0F] +
+      HEX_CHARS[(h0l >> 4) & 0x0F] + HEX_CHARS[h0l & 0x0F] +
+      HEX_CHARS[(h1h >> 28) & 0x0F] + HEX_CHARS[(h1h >> 24) & 0x0F] +
+      HEX_CHARS[(h1h >> 20) & 0x0F] + HEX_CHARS[(h1h >> 16) & 0x0F] +
+      HEX_CHARS[(h1h >> 12) & 0x0F] + HEX_CHARS[(h1h >> 8) & 0x0F] +
+      HEX_CHARS[(h1h >> 4) & 0x0F] + HEX_CHARS[h1h & 0x0F] +
+      HEX_CHARS[(h1l >> 28) & 0x0F] + HEX_CHARS[(h1l >> 24) & 0x0F] +
+      HEX_CHARS[(h1l >> 20) & 0x0F] + HEX_CHARS[(h1l >> 16) & 0x0F] +
+      HEX_CHARS[(h1l >> 12) & 0x0F] + HEX_CHARS[(h1l >> 8) & 0x0F] +
+      HEX_CHARS[(h1l >> 4) & 0x0F] + HEX_CHARS[h1l & 0x0F] +
+      HEX_CHARS[(h2h >> 28) & 0x0F] + HEX_CHARS[(h2h >> 24) & 0x0F] +
+      HEX_CHARS[(h2h >> 20) & 0x0F] + HEX_CHARS[(h2h >> 16) & 0x0F] +
+      HEX_CHARS[(h2h >> 12) & 0x0F] + HEX_CHARS[(h2h >> 8) & 0x0F] +
+      HEX_CHARS[(h2h >> 4) & 0x0F] + HEX_CHARS[h2h & 0x0F] +
+      HEX_CHARS[(h2l >> 28) & 0x0F] + HEX_CHARS[(h2l >> 24) & 0x0F] +
+      HEX_CHARS[(h2l >> 20) & 0x0F] + HEX_CHARS[(h2l >> 16) & 0x0F] +
+      HEX_CHARS[(h2l >> 12) & 0x0F] + HEX_CHARS[(h2l >> 8) & 0x0F] +
+      HEX_CHARS[(h2l >> 4) & 0x0F] + HEX_CHARS[h2l & 0x0F] +
+      HEX_CHARS[(h3h >> 28) & 0x0F] + HEX_CHARS[(h3h >> 24) & 0x0F] +
+      HEX_CHARS[(h3h >> 20) & 0x0F] + HEX_CHARS[(h3h >> 16) & 0x0F] +
+      HEX_CHARS[(h3h >> 12) & 0x0F] + HEX_CHARS[(h3h >> 8) & 0x0F] +
+      HEX_CHARS[(h3h >> 4) & 0x0F] + HEX_CHARS[h3h & 0x0F];
+    if (bits >= 256) {
+      hex += HEX_CHARS[(h3l >> 28) & 0x0F] + HEX_CHARS[(h3l >> 24) & 0x0F] +
+        HEX_CHARS[(h3l >> 20) & 0x0F] + HEX_CHARS[(h3l >> 16) & 0x0F] +
+        HEX_CHARS[(h3l >> 12) & 0x0F] + HEX_CHARS[(h3l >> 8) & 0x0F] +
+        HEX_CHARS[(h3l >> 4) & 0x0F] + HEX_CHARS[h3l & 0x0F];
+    }
+    if (bits >= 384) {
+      hex += HEX_CHARS[(h4h >> 28) & 0x0F] + HEX_CHARS[(h4h >> 24) & 0x0F] +
+        HEX_CHARS[(h4h >> 20) & 0x0F] + HEX_CHARS[(h4h >> 16) & 0x0F] +
+        HEX_CHARS[(h4h >> 12) & 0x0F] + HEX_CHARS[(h4h >> 8) & 0x0F] +
+        HEX_CHARS[(h4h >> 4) & 0x0F] + HEX_CHARS[h4h & 0x0F] +
+        HEX_CHARS[(h4l >> 28) & 0x0F] + HEX_CHARS[(h4l >> 24) & 0x0F] +
+        HEX_CHARS[(h4l >> 20) & 0x0F] + HEX_CHARS[(h4l >> 16) & 0x0F] +
+        HEX_CHARS[(h4l >> 12) & 0x0F] + HEX_CHARS[(h4l >> 8) & 0x0F] +
+        HEX_CHARS[(h4l >> 4) & 0x0F] + HEX_CHARS[h4l & 0x0F] +
+        HEX_CHARS[(h5h >> 28) & 0x0F] + HEX_CHARS[(h5h >> 24) & 0x0F] +
+        HEX_CHARS[(h5h >> 20) & 0x0F] + HEX_CHARS[(h5h >> 16) & 0x0F] +
+        HEX_CHARS[(h5h >> 12) & 0x0F] + HEX_CHARS[(h5h >> 8) & 0x0F] +
+        HEX_CHARS[(h5h >> 4) & 0x0F] + HEX_CHARS[h5h & 0x0F] +
+        HEX_CHARS[(h5l >> 28) & 0x0F] + HEX_CHARS[(h5l >> 24) & 0x0F] +
+        HEX_CHARS[(h5l >> 20) & 0x0F] + HEX_CHARS[(h5l >> 16) & 0x0F] +
+        HEX_CHARS[(h5l >> 12) & 0x0F] + HEX_CHARS[(h5l >> 8) & 0x0F] +
+        HEX_CHARS[(h5l >> 4) & 0x0F] + HEX_CHARS[h5l & 0x0F];
+    }
+    if (bits == 512) {
+      hex += HEX_CHARS[(h6h >> 28) & 0x0F] + HEX_CHARS[(h6h >> 24) & 0x0F] +
+        HEX_CHARS[(h6h >> 20) & 0x0F] + HEX_CHARS[(h6h >> 16) & 0x0F] +
+        HEX_CHARS[(h6h >> 12) & 0x0F] + HEX_CHARS[(h6h >> 8) & 0x0F] +
+        HEX_CHARS[(h6h >> 4) & 0x0F] + HEX_CHARS[h6h & 0x0F] +
+        HEX_CHARS[(h6l >> 28) & 0x0F] + HEX_CHARS[(h6l >> 24) & 0x0F] +
+        HEX_CHARS[(h6l >> 20) & 0x0F] + HEX_CHARS[(h6l >> 16) & 0x0F] +
+        HEX_CHARS[(h6l >> 12) & 0x0F] + HEX_CHARS[(h6l >> 8) & 0x0F] +
+        HEX_CHARS[(h6l >> 4) & 0x0F] + HEX_CHARS[h6l & 0x0F] +
+        HEX_CHARS[(h7h >> 28) & 0x0F] + HEX_CHARS[(h7h >> 24) & 0x0F] +
+        HEX_CHARS[(h7h >> 20) & 0x0F] + HEX_CHARS[(h7h >> 16) & 0x0F] +
+        HEX_CHARS[(h7h >> 12) & 0x0F] + HEX_CHARS[(h7h >> 8) & 0x0F] +
+        HEX_CHARS[(h7h >> 4) & 0x0F] + HEX_CHARS[h7h & 0x0F] +
+        HEX_CHARS[(h7l >> 28) & 0x0F] + HEX_CHARS[(h7l >> 24) & 0x0F] +
+        HEX_CHARS[(h7l >> 20) & 0x0F] + HEX_CHARS[(h7l >> 16) & 0x0F] +
+        HEX_CHARS[(h7l >> 12) & 0x0F] + HEX_CHARS[(h7l >> 8) & 0x0F] +
+        HEX_CHARS[(h7l >> 4) & 0x0F] + HEX_CHARS[h7l & 0x0F];
+    }
+    return hex;
+  };
+
+  Sha512.prototype.toString = Sha512.prototype.hex;
+
+  Sha512.prototype.digest = function () {
+    this.finalize();
+
+    var h0h = this.h0h, h0l = this.h0l, h1h = this.h1h, h1l = this.h1l,
+      h2h = this.h2h, h2l = this.h2l, h3h = this.h3h, h3l = this.h3l,
+      h4h = this.h4h, h4l = this.h4l, h5h = this.h5h, h5l = this.h5l,
+      h6h = this.h6h, h6l = this.h6l, h7h = this.h7h, h7l = this.h7l,
+      bits = this.bits;
+
+    var arr = [
+      (h0h >> 24) & 0xFF, (h0h >> 16) & 0xFF, (h0h >> 8) & 0xFF, h0h & 0xFF,
+      (h0l >> 24) & 0xFF, (h0l >> 16) & 0xFF, (h0l >> 8) & 0xFF, h0l & 0xFF,
+      (h1h >> 24) & 0xFF, (h1h >> 16) & 0xFF, (h1h >> 8) & 0xFF, h1h & 0xFF,
+      (h1l >> 24) & 0xFF, (h1l >> 16) & 0xFF, (h1l >> 8) & 0xFF, h1l & 0xFF,
+      (h2h >> 24) & 0xFF, (h2h >> 16) & 0xFF, (h2h >> 8) & 0xFF, h2h & 0xFF,
+      (h2l >> 24) & 0xFF, (h2l >> 16) & 0xFF, (h2l >> 8) & 0xFF, h2l & 0xFF,
+      (h3h >> 24) & 0xFF, (h3h >> 16) & 0xFF, (h3h >> 8) & 0xFF, h3h & 0xFF
+    ];
+
+    if (bits >= 256) {
+      arr.push((h3l >> 24) & 0xFF, (h3l >> 16) & 0xFF, (h3l >> 8) & 0xFF, h3l & 0xFF);
+    }
+    if (bits >= 384) {
+      arr.push(
+        (h4h >> 24) & 0xFF, (h4h >> 16) & 0xFF, (h4h >> 8) & 0xFF, h4h & 0xFF,
+        (h4l >> 24) & 0xFF, (h4l >> 16) & 0xFF, (h4l >> 8) & 0xFF, h4l & 0xFF,
+        (h5h >> 24) & 0xFF, (h5h >> 16) & 0xFF, (h5h >> 8) & 0xFF, h5h & 0xFF,
+        (h5l >> 24) & 0xFF, (h5l >> 16) & 0xFF, (h5l >> 8) & 0xFF, h5l & 0xFF
+      );
+    }
+    if (bits == 512) {
+      arr.push(
+        (h6h >> 24) & 0xFF, (h6h >> 16) & 0xFF, (h6h >> 8) & 0xFF, h6h & 0xFF,
+        (h6l >> 24) & 0xFF, (h6l >> 16) & 0xFF, (h6l >> 8) & 0xFF, h6l & 0xFF,
+        (h7h >> 24) & 0xFF, (h7h >> 16) & 0xFF, (h7h >> 8) & 0xFF, h7h & 0xFF,
+        (h7l >> 24) & 0xFF, (h7l >> 16) & 0xFF, (h7l >> 8) & 0xFF, h7l & 0xFF
+      );
+    }
+    return arr;
+  };
+
+  Sha512.prototype.array = Sha512.prototype.digest;
+
+  Sha512.prototype.arrayBuffer = function () {
+    this.finalize();
+
+    var bits = this.bits;
+    var buffer = new ArrayBuffer(bits / 8);
+    var dataView = new DataView(buffer);
+    dataView.setUint32(0, this.h0h);
+    dataView.setUint32(4, this.h0l);
+    dataView.setUint32(8, this.h1h);
+    dataView.setUint32(12, this.h1l);
+    dataView.setUint32(16, this.h2h);
+    dataView.setUint32(20, this.h2l);
+    dataView.setUint32(24, this.h3h);
+
+    if (bits >= 256) {
+      dataView.setUint32(28, this.h3l);
+    }
+    if (bits >= 384) {
+      dataView.setUint32(32, this.h4h);
+      dataView.setUint32(36, this.h4l);
+      dataView.setUint32(40, this.h5h);
+      dataView.setUint32(44, this.h5l);
+    }
+    if (bits == 512) {
+      dataView.setUint32(48, this.h6h);
+      dataView.setUint32(52, this.h6l);
+      dataView.setUint32(56, this.h7h);
+      dataView.setUint32(60, this.h7l);
+    }
+    return buffer;
+  };
+
+  Sha512.prototype.clone = function () {
+    var hash = new Sha512(this.bits, false);
+    this.copyTo(hash);
+    return hash;
+  };
+
+  Sha512.prototype.copyTo = function (hash) {
+    var i = 0, attrs = [
+      'h0h', 'h0l', 'h1h', 'h1l', 'h2h', 'h2l', 'h3h', 'h3l', 'h4h', 'h4l', 'h5h', 'h5l', 'h6h', 'h6l', 'h7h', 'h7l',
+      'start', 'bytes', 'hBytes', 'finalized', 'hashed', 'lastByteIndex'
+    ];
+    for (i = 0; i < attrs.length; ++i) {
+      hash[attrs[i]] = this[attrs[i]];
+    }
+    for (i = 0; i < this.blocks.length; ++i) {
+      hash.blocks[i] = this.blocks[i];
+    }
+  };
+
+  function HmacSha512(key, bits, sharedMemory) {
+    var notString, type = typeof key;
+    if (type !== 'string') {
+      if (type === 'object') {
+        if (key === null) {
+          throw new Error(INPUT_ERROR);
+        } else if (ARRAY_BUFFER && key.constructor === ArrayBuffer) {
+          key = new Uint8Array(key);
+        } else if (!Array.isArray(key)) {
+          if (!ARRAY_BUFFER || !ArrayBuffer.isView(key)) {
+            throw new Error(INPUT_ERROR);
+          }
+        }
+      } else {
+        throw new Error(INPUT_ERROR);
+      }
+      notString = true;
+    }
+    var length = key.length;
+    if (!notString) {
+      var bytes = [], length = key.length, index = 0, code;
+      for (var i = 0; i < length; ++i) {
+        code = key.charCodeAt(i);
+        if (code < 0x80) {
+          bytes[index++] = code;
+        } else if (code < 0x800) {
+          bytes[index++] = (0xc0 | (code >> 6));
+          bytes[index++] = (0x80 | (code & 0x3f));
+        } else if (code < 0xd800 || code >= 0xe000) {
+          bytes[index++] = (0xe0 | (code >> 12));
+          bytes[index++] = (0x80 | ((code >> 6) & 0x3f));
+          bytes[index++] = (0x80 | (code & 0x3f));
+        } else {
+          code = 0x10000 + (((code & 0x3ff) << 10) | (key.charCodeAt(++i) & 0x3ff));
+          bytes[index++] = (0xf0 | (code >> 18));
+          bytes[index++] = (0x80 | ((code >> 12) & 0x3f));
+          bytes[index++] = (0x80 | ((code >> 6) & 0x3f));
+          bytes[index++] = (0x80 | (code & 0x3f));
+        }
+      }
+      key = bytes;
+    }
+
+    if (key.length > 128) {
+      key = (new Sha512(bits, true)).update(key).array();
+    }
+
+    var oKeyPad = [], iKeyPad = [];
+    for (var i = 0; i < 128; ++i) {
+      var b = key[i] || 0;
+      oKeyPad[i] = 0x5c ^ b;
+      iKeyPad[i] = 0x36 ^ b;
+    }
+
+    Sha512.call(this, bits, sharedMemory);
+
+    this.update(iKeyPad);
+    this.oKeyPad = oKeyPad;
+    this.inner = true;
+    this.sharedMemory = sharedMemory;
+  }
+  HmacSha512.prototype = new Sha512();
+
+  HmacSha512.prototype.finalize = function () {
+    Sha512.prototype.finalize.call(this);
+    if (this.inner) {
+      this.inner = false;
+      var innerHash = this.array();
+      Sha512.call(this, this.bits, this.sharedMemory);
+      this.update(this.oKeyPad);
+      this.update(innerHash);
+      Sha512.prototype.finalize.call(this);
+    }
+  };
+
+  HmacSha512.prototype.clone = function () {
+    var hash = new HmacSha512([], this.bits, false);
+    this.copyTo(hash);
+    hash.inner = this.inner;
+    for (var i = 0; i < this.oKeyPad.length; ++i) {
+      hash.oKeyPad[i] = this.oKeyPad[i];
+    }
+    return hash;
+  };
+
+  var exports = createMethod(512);
+  exports.sha512 = exports;
+  exports.sha384 = createMethod(384);
+  exports.sha512_256 = createMethod(256);
+  exports.sha512_224 = createMethod(224);
+  exports.sha512.hmac = createHmacMethod(512);
+  exports.sha384.hmac = createHmacMethod(384);
+  exports.sha512_256.hmac = createHmacMethod(256);
+  exports.sha512_224.hmac = createHmacMethod(224);
+
+  if (COMMON_JS) {
+    module.exports = exports;
+  } else {
+    root.sha512 = exports.sha512;
+    root.sha384 = exports.sha384;
+    root.sha512_256 = exports.sha512_256;
+    root.sha512_224 = exports.sha512_224;
+    if (AMD) {
+      define(function () {
+        return exports;
+      });
+    }
+  }
+})();
+
+}).call(this)}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"_process":35}],33:[function(require,module,exports){
 /*
  A JavaScript implementation of the SHA family of hashes, as
  defined in FIPS PUB 180-4 and FIPS PUB 202, as well as the corresponding
  HMAC implementation as defined in FIPS PUB 198a
 
- Copyright Brian Turek 2008-2017
+ Copyright 2008-2020 Brian Turek, 1998-2009 Paul Johnston & Contributors
  Distributed under the BSD License
  See http://caligatio.github.com/jsSHA/ for more information
-
- Several functions taken from Paul Johnston
 */
-'use strict';(function(I){function w(c,a,d){var l=0,b=[],g=0,f,n,k,e,h,q,y,p,m=!1,t=[],r=[],u,z=!1;d=d||{};f=d.encoding||"UTF8";u=d.numRounds||1;if(u!==parseInt(u,10)||1>u)throw Error("numRounds must a integer >= 1");if(0===c.lastIndexOf("SHA-",0))if(q=function(b,a){return A(b,a,c)},y=function(b,a,l,f){var g,e;if("SHA-224"===c||"SHA-256"===c)g=(a+65>>>9<<4)+15,e=16;else throw Error("Unexpected error in SHA-2 implementation");for(;b.length<=g;)b.push(0);b[a>>>5]|=128<<24-a%32;a=a+l;b[g]=a&4294967295;
-b[g-1]=a/4294967296|0;l=b.length;for(a=0;a<l;a+=e)f=A(b.slice(a,a+e),f,c);if("SHA-224"===c)b=[f[0],f[1],f[2],f[3],f[4],f[5],f[6]];else if("SHA-256"===c)b=f;else throw Error("Unexpected error in SHA-2 implementation");return b},p=function(b){return b.slice()},"SHA-224"===c)h=512,e=224;else if("SHA-256"===c)h=512,e=256;else throw Error("Chosen SHA variant is not supported");else throw Error("Chosen SHA variant is not supported");k=B(a,f);n=x(c);this.setHMACKey=function(b,a,g){var e;if(!0===m)throw Error("HMAC key already set");
-if(!0===z)throw Error("Cannot set HMAC key after calling update");f=(g||{}).encoding||"UTF8";a=B(a,f)(b);b=a.binLen;a=a.value;e=h>>>3;g=e/4-1;if(e<b/8){for(a=y(a,b,0,x(c));a.length<=g;)a.push(0);a[g]&=4294967040}else if(e>b/8){for(;a.length<=g;)a.push(0);a[g]&=4294967040}for(b=0;b<=g;b+=1)t[b]=a[b]^909522486,r[b]=a[b]^1549556828;n=q(t,n);l=h;m=!0};this.update=function(a){var c,f,e,d=0,p=h>>>5;c=k(a,b,g);a=c.binLen;f=c.value;c=a>>>5;for(e=0;e<c;e+=p)d+h<=a&&(n=q(f.slice(e,e+p),n),d+=h);l+=d;b=f.slice(d>>>
-5);g=a%h;z=!0};this.getHash=function(a,f){var d,h,k,q;if(!0===m)throw Error("Cannot call getHash after setting HMAC key");k=C(f);switch(a){case "HEX":d=function(a){return D(a,e,k)};break;case "B64":d=function(a){return E(a,e,k)};break;case "BYTES":d=function(a){return F(a,e)};break;case "ARRAYBUFFER":try{h=new ArrayBuffer(0)}catch(v){throw Error("ARRAYBUFFER not supported by this environment");}d=function(a){return G(a,e)};break;default:throw Error("format must be HEX, B64, BYTES, or ARRAYBUFFER");
-}q=y(b.slice(),g,l,p(n));for(h=1;h<u;h+=1)q=y(q,e,0,x(c));return d(q)};this.getHMAC=function(a,f){var d,k,t,u;if(!1===m)throw Error("Cannot call getHMAC without first setting HMAC key");t=C(f);switch(a){case "HEX":d=function(a){return D(a,e,t)};break;case "B64":d=function(a){return E(a,e,t)};break;case "BYTES":d=function(a){return F(a,e)};break;case "ARRAYBUFFER":try{d=new ArrayBuffer(0)}catch(v){throw Error("ARRAYBUFFER not supported by this environment");}d=function(a){return G(a,e)};break;default:throw Error("outputFormat must be HEX, B64, BYTES, or ARRAYBUFFER");
-}k=y(b.slice(),g,l,p(n));u=q(r,x(c));u=y(k,e,h,u);return d(u)}}function m(){}function D(c,a,d){var l="";a/=8;var b,g;for(b=0;b<a;b+=1)g=c[b>>>2]>>>8*(3+b%4*-1),l+="0123456789abcdef".charAt(g>>>4&15)+"0123456789abcdef".charAt(g&15);return d.outputUpper?l.toUpperCase():l}function E(c,a,d){var l="",b=a/8,g,f,n;for(g=0;g<b;g+=3)for(f=g+1<b?c[g+1>>>2]:0,n=g+2<b?c[g+2>>>2]:0,n=(c[g>>>2]>>>8*(3+g%4*-1)&255)<<16|(f>>>8*(3+(g+1)%4*-1)&255)<<8|n>>>8*(3+(g+2)%4*-1)&255,f=0;4>f;f+=1)8*g+6*f<=a?l+="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".charAt(n>>>
-6*(3-f)&63):l+=d.b64Pad;return l}function F(c,a){var d="",l=a/8,b,g;for(b=0;b<l;b+=1)g=c[b>>>2]>>>8*(3+b%4*-1)&255,d+=String.fromCharCode(g);return d}function G(c,a){var d=a/8,l,b=new ArrayBuffer(d),g;g=new Uint8Array(b);for(l=0;l<d;l+=1)g[l]=c[l>>>2]>>>8*(3+l%4*-1)&255;return b}function C(c){var a={outputUpper:!1,b64Pad:"=",shakeLen:-1};c=c||{};a.outputUpper=c.outputUpper||!1;!0===c.hasOwnProperty("b64Pad")&&(a.b64Pad=c.b64Pad);if("boolean"!==typeof a.outputUpper)throw Error("Invalid outputUpper formatting option");
-if("string"!==typeof a.b64Pad)throw Error("Invalid b64Pad formatting option");return a}function B(c,a){var d;switch(a){case "UTF8":case "UTF16BE":case "UTF16LE":break;default:throw Error("encoding must be UTF8, UTF16BE, or UTF16LE");}switch(c){case "HEX":d=function(a,b,c){var f=a.length,d,k,e,h,q;if(0!==f%2)throw Error("String of HEX type must be in byte increments");b=b||[0];c=c||0;q=c>>>3;for(d=0;d<f;d+=2){k=parseInt(a.substr(d,2),16);if(isNaN(k))throw Error("String of HEX type contains invalid characters");
-h=(d>>>1)+q;for(e=h>>>2;b.length<=e;)b.push(0);b[e]|=k<<8*(3+h%4*-1)}return{value:b,binLen:4*f+c}};break;case "TEXT":d=function(c,b,d){var f,n,k=0,e,h,q,m,p,r;b=b||[0];d=d||0;q=d>>>3;if("UTF8"===a)for(r=3,e=0;e<c.length;e+=1)for(f=c.charCodeAt(e),n=[],128>f?n.push(f):2048>f?(n.push(192|f>>>6),n.push(128|f&63)):55296>f||57344<=f?n.push(224|f>>>12,128|f>>>6&63,128|f&63):(e+=1,f=65536+((f&1023)<<10|c.charCodeAt(e)&1023),n.push(240|f>>>18,128|f>>>12&63,128|f>>>6&63,128|f&63)),h=0;h<n.length;h+=1){p=k+
-q;for(m=p>>>2;b.length<=m;)b.push(0);b[m]|=n[h]<<8*(r+p%4*-1);k+=1}else if("UTF16BE"===a||"UTF16LE"===a)for(r=2,n="UTF16LE"===a&&!0||"UTF16LE"!==a&&!1,e=0;e<c.length;e+=1){f=c.charCodeAt(e);!0===n&&(h=f&255,f=h<<8|f>>>8);p=k+q;for(m=p>>>2;b.length<=m;)b.push(0);b[m]|=f<<8*(r+p%4*-1);k+=2}return{value:b,binLen:8*k+d}};break;case "B64":d=function(a,b,c){var f=0,d,k,e,h,q,m,p;if(-1===a.search(/^[a-zA-Z0-9=+\/]+$/))throw Error("Invalid character in base-64 string");k=a.indexOf("=");a=a.replace(/\=/g,
-"");if(-1!==k&&k<a.length)throw Error("Invalid '=' found in base-64 string");b=b||[0];c=c||0;m=c>>>3;for(k=0;k<a.length;k+=4){q=a.substr(k,4);for(e=h=0;e<q.length;e+=1)d="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".indexOf(q[e]),h|=d<<18-6*e;for(e=0;e<q.length-1;e+=1){p=f+m;for(d=p>>>2;b.length<=d;)b.push(0);b[d]|=(h>>>16-8*e&255)<<8*(3+p%4*-1);f+=1}}return{value:b,binLen:8*f+c}};break;case "BYTES":d=function(a,b,c){var d,n,k,e,h;b=b||[0];c=c||0;k=c>>>3;for(n=0;n<a.length;n+=
-1)d=a.charCodeAt(n),h=n+k,e=h>>>2,b.length<=e&&b.push(0),b[e]|=d<<8*(3+h%4*-1);return{value:b,binLen:8*a.length+c}};break;case "ARRAYBUFFER":try{d=new ArrayBuffer(0)}catch(l){throw Error("ARRAYBUFFER not supported by this environment");}d=function(a,b,c){var d,n,k,e,h;b=b||[0];c=c||0;n=c>>>3;h=new Uint8Array(a);for(d=0;d<a.byteLength;d+=1)e=d+n,k=e>>>2,b.length<=k&&b.push(0),b[k]|=h[d]<<8*(3+e%4*-1);return{value:b,binLen:8*a.byteLength+c}};break;default:throw Error("format must be HEX, TEXT, B64, BYTES, or ARRAYBUFFER");
-}return d}function r(c,a){return c>>>a|c<<32-a}function J(c,a,d){return c&a^~c&d}function K(c,a,d){return c&a^c&d^a&d}function L(c){return r(c,2)^r(c,13)^r(c,22)}function M(c){return r(c,6)^r(c,11)^r(c,25)}function N(c){return r(c,7)^r(c,18)^c>>>3}function O(c){return r(c,17)^r(c,19)^c>>>10}function P(c,a){var d=(c&65535)+(a&65535);return((c>>>16)+(a>>>16)+(d>>>16)&65535)<<16|d&65535}function Q(c,a,d,l){var b=(c&65535)+(a&65535)+(d&65535)+(l&65535);return((c>>>16)+(a>>>16)+(d>>>16)+(l>>>16)+(b>>>
-16)&65535)<<16|b&65535}function R(c,a,d,l,b){var g=(c&65535)+(a&65535)+(d&65535)+(l&65535)+(b&65535);return((c>>>16)+(a>>>16)+(d>>>16)+(l>>>16)+(b>>>16)+(g>>>16)&65535)<<16|g&65535}function x(c){var a=[],d;if(0===c.lastIndexOf("SHA-",0))switch(a=[3238371032,914150663,812702999,4144912697,4290775857,1750603025,1694076839,3204075428],d=[1779033703,3144134277,1013904242,2773480762,1359893119,2600822924,528734635,1541459225],c){case "SHA-224":break;case "SHA-256":a=d;break;case "SHA-384":a=[new m,new m,
-new m,new m,new m,new m,new m,new m];break;case "SHA-512":a=[new m,new m,new m,new m,new m,new m,new m,new m];break;default:throw Error("Unknown SHA variant");}else throw Error("No SHA variants supported");return a}function A(c,a,d){var l,b,g,f,n,k,e,h,m,r,p,w,t,x,u,z,A,B,C,D,E,F,v=[],G;if("SHA-224"===d||"SHA-256"===d)r=64,w=1,F=Number,t=P,x=Q,u=R,z=N,A=O,B=L,C=M,E=K,D=J,G=H;else throw Error("Unexpected error in SHA-2 implementation");d=a[0];l=a[1];b=a[2];g=a[3];f=a[4];n=a[5];k=a[6];e=a[7];for(p=
-0;p<r;p+=1)16>p?(m=p*w,h=c.length<=m?0:c[m],m=c.length<=m+1?0:c[m+1],v[p]=new F(h,m)):v[p]=x(A(v[p-2]),v[p-7],z(v[p-15]),v[p-16]),h=u(e,C(f),D(f,n,k),G[p],v[p]),m=t(B(d),E(d,l,b)),e=k,k=n,n=f,f=t(g,h),g=b,b=l,l=d,d=t(h,m);a[0]=t(d,a[0]);a[1]=t(l,a[1]);a[2]=t(b,a[2]);a[3]=t(g,a[3]);a[4]=t(f,a[4]);a[5]=t(n,a[5]);a[6]=t(k,a[6]);a[7]=t(e,a[7]);return a}var H;H=[1116352408,1899447441,3049323471,3921009573,961987163,1508970993,2453635748,2870763221,3624381080,310598401,607225278,1426881987,1925078388,2162078206,
-2614888103,3248222580,3835390401,4022224774,264347078,604807628,770255983,1249150122,1555081692,1996064986,2554220882,2821834349,2952996808,3210313671,3336571891,3584528711,113926993,338241895,666307205,773529912,1294757372,1396182291,1695183700,1986661051,2177026350,2456956037,2730485921,2820302411,3259730800,3345764771,3516065817,3600352804,4094571909,275423344,430227734,506948616,659060556,883997877,958139571,1322822218,1537002063,1747873779,1955562222,2024104815,2227730452,2361852424,2428436474,
-2756734187,3204031479,3329325298];"function"===typeof define&&define.amd?define(function(){return w}):"undefined"!==typeof exports?("undefined"!==typeof module&&module.exports&&(module.exports=w),exports=w):I.jsSHA=w})(this);
+'use strict';(function(aa){function C(d,b,a){var h=0,k=[],m=0,g,l,c,f,n,q,u,r,I=!1,v=[],x=[],t,y=!1,z=!1,w=-1;a=a||{};g=a.encoding||"UTF8";t=a.numRounds||1;if(t!==parseInt(t,10)||1>t)throw Error("numRounds must a integer >= 1");if("SHA-1"===d)n=512,q=K,u=ba,f=160,r=function(b){return b.slice()};else if(0===d.lastIndexOf("SHA-",0))if(q=function(b,h){return L(b,h,d)},u=function(b,h,k,a){var e,f;if("SHA-224"===d||"SHA-256"===d)e=(h+65>>>9<<4)+15,f=16;else if("SHA-384"===d||"SHA-512"===d)e=(h+129>>>10<<
+5)+31,f=32;else throw Error("Unexpected error in SHA-2 implementation");for(;b.length<=e;)b.push(0);b[h>>>5]|=128<<24-h%32;h=h+k;b[e]=h&4294967295;b[e-1]=h/4294967296|0;k=b.length;for(h=0;h<k;h+=f)a=L(b.slice(h,h+f),a,d);if("SHA-224"===d)b=[a[0],a[1],a[2],a[3],a[4],a[5],a[6]];else if("SHA-256"===d)b=a;else if("SHA-384"===d)b=[a[0].a,a[0].b,a[1].a,a[1].b,a[2].a,a[2].b,a[3].a,a[3].b,a[4].a,a[4].b,a[5].a,a[5].b];else if("SHA-512"===d)b=[a[0].a,a[0].b,a[1].a,a[1].b,a[2].a,a[2].b,a[3].a,a[3].b,a[4].a,
+a[4].b,a[5].a,a[5].b,a[6].a,a[6].b,a[7].a,a[7].b];else throw Error("Unexpected error in SHA-2 implementation");return b},r=function(b){return b.slice()},"SHA-224"===d)n=512,f=224;else if("SHA-256"===d)n=512,f=256;else if("SHA-384"===d)n=1024,f=384;else if("SHA-512"===d)n=1024,f=512;else throw Error("Chosen SHA variant is not supported");else if(0===d.lastIndexOf("SHA3-",0)||0===d.lastIndexOf("SHAKE",0)){var F=6;q=D;r=function(b){var d=[],a;for(a=0;5>a;a+=1)d[a]=b[a].slice();return d};w=1;if("SHA3-224"===
+d)n=1152,f=224;else if("SHA3-256"===d)n=1088,f=256;else if("SHA3-384"===d)n=832,f=384;else if("SHA3-512"===d)n=576,f=512;else if("SHAKE128"===d)n=1344,f=-1,F=31,z=!0;else if("SHAKE256"===d)n=1088,f=-1,F=31,z=!0;else throw Error("Chosen SHA variant is not supported");u=function(b,d,a,h,k){a=n;var e=F,f,g=[],m=a>>>5,l=0,c=d>>>5;for(f=0;f<c&&d>=a;f+=m)h=D(b.slice(f,f+m),h),d-=a;b=b.slice(f);for(d%=a;b.length<m;)b.push(0);f=d>>>3;b[f>>2]^=e<<f%4*8;b[m-1]^=2147483648;for(h=D(b,h);32*g.length<k;){b=h[l%
+5][l/5|0];g.push(b.b);if(32*g.length>=k)break;g.push(b.a);l+=1;0===64*l%a&&(D(null,h),l=0)}return g}}else throw Error("Chosen SHA variant is not supported");c=M(b,g,w);l=A(d);this.setHMACKey=function(b,a,k){var e;if(!0===I)throw Error("HMAC key already set");if(!0===y)throw Error("Cannot set HMAC key after calling update");if(!0===z)throw Error("SHAKE is not supported for HMAC");g=(k||{}).encoding||"UTF8";a=M(a,g,w)(b);b=a.binLen;a=a.value;e=n>>>3;k=e/4-1;for(e<b/8&&(a=u(a,b,0,A(d),f));a.length<=
+k;)a.push(0);for(b=0;b<=k;b+=1)v[b]=a[b]^909522486,x[b]=a[b]^1549556828;l=q(v,l);h=n;I=!0};this.update=function(b){var d,a,e,f=0,g=n>>>5;d=c(b,k,m);b=d.binLen;a=d.value;d=b>>>5;for(e=0;e<d;e+=g)f+n<=b&&(l=q(a.slice(e,e+g),l),f+=n);h+=f;k=a.slice(f>>>5);m=b%n;y=!0};this.getHash=function(b,a){var e,g,c,n;if(!0===I)throw Error("Cannot call getHash after setting HMAC key");c=N(a);if(!0===z){if(-1===c.shakeLen)throw Error("shakeLen must be specified in options");f=c.shakeLen}switch(b){case "HEX":e=function(b){return O(b,
+f,w,c)};break;case "B64":e=function(b){return P(b,f,w,c)};break;case "BYTES":e=function(b){return Q(b,f,w)};break;case "ARRAYBUFFER":try{g=new ArrayBuffer(0)}catch(p){throw Error("ARRAYBUFFER not supported by this environment");}e=function(b){return R(b,f,w)};break;case "UINT8ARRAY":try{g=new Uint8Array(0)}catch(p){throw Error("UINT8ARRAY not supported by this environment");}e=function(b){return S(b,f,w)};break;default:throw Error("format must be HEX, B64, BYTES, ARRAYBUFFER, or UINT8ARRAY");}n=u(k.slice(),
+m,h,r(l),f);for(g=1;g<t;g+=1)!0===z&&0!==f%32&&(n[n.length-1]&=16777215>>>24-f%32),n=u(n,f,0,A(d),f);return e(n)};this.getHMAC=function(b,a){var e,g,c,p;if(!1===I)throw Error("Cannot call getHMAC without first setting HMAC key");c=N(a);switch(b){case "HEX":e=function(b){return O(b,f,w,c)};break;case "B64":e=function(b){return P(b,f,w,c)};break;case "BYTES":e=function(b){return Q(b,f,w)};break;case "ARRAYBUFFER":try{e=new ArrayBuffer(0)}catch(v){throw Error("ARRAYBUFFER not supported by this environment");
+}e=function(b){return R(b,f,w)};break;case "UINT8ARRAY":try{e=new Uint8Array(0)}catch(v){throw Error("UINT8ARRAY not supported by this environment");}e=function(b){return S(b,f,w)};break;default:throw Error("outputFormat must be HEX, B64, BYTES, ARRAYBUFFER, or UINT8ARRAY");}g=u(k.slice(),m,h,r(l),f);p=q(x,A(d));p=u(g,f,n,p,f);return e(p)}}function a(d,b){this.a=d;this.b=b}function T(d,b,a,h){var k,m,g,l,c;b=b||[0];a=a||0;m=a>>>3;c=-1===h?3:0;for(k=0;k<d.length;k+=1)l=k+m,g=l>>>2,b.length<=g&&b.push(0),
+b[g]|=d[k]<<8*(c+l%4*h);return{value:b,binLen:8*d.length+a}}function O(a,b,e,h){var k="";b/=8;var m,g,c;c=-1===e?3:0;for(m=0;m<b;m+=1)g=a[m>>>2]>>>8*(c+m%4*e),k+="0123456789abcdef".charAt(g>>>4&15)+"0123456789abcdef".charAt(g&15);return h.outputUpper?k.toUpperCase():k}function P(a,b,e,h){var k="",m=b/8,g,c,p,f;f=-1===e?3:0;for(g=0;g<m;g+=3)for(c=g+1<m?a[g+1>>>2]:0,p=g+2<m?a[g+2>>>2]:0,p=(a[g>>>2]>>>8*(f+g%4*e)&255)<<16|(c>>>8*(f+(g+1)%4*e)&255)<<8|p>>>8*(f+(g+2)%4*e)&255,c=0;4>c;c+=1)8*g+6*c<=b?k+=
+"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".charAt(p>>>6*(3-c)&63):k+=h.b64Pad;return k}function Q(a,b,e){var h="";b/=8;var k,c,g;g=-1===e?3:0;for(k=0;k<b;k+=1)c=a[k>>>2]>>>8*(g+k%4*e)&255,h+=String.fromCharCode(c);return h}function R(a,b,e){b/=8;var h,k=new ArrayBuffer(b),c,g;g=new Uint8Array(k);c=-1===e?3:0;for(h=0;h<b;h+=1)g[h]=a[h>>>2]>>>8*(c+h%4*e)&255;return k}function S(a,b,e){b/=8;var h,k=new Uint8Array(b),c;c=-1===e?3:0;for(h=0;h<b;h+=1)k[h]=a[h>>>2]>>>8*(c+h%4*e)&
+255;return k}function N(a){var b={outputUpper:!1,b64Pad:"=",shakeLen:-1};a=a||{};b.outputUpper=a.outputUpper||!1;!0===a.hasOwnProperty("b64Pad")&&(b.b64Pad=a.b64Pad);if(!0===a.hasOwnProperty("shakeLen")){if(0!==a.shakeLen%8)throw Error("shakeLen must be a multiple of 8");b.shakeLen=a.shakeLen}if("boolean"!==typeof b.outputUpper)throw Error("Invalid outputUpper formatting option");if("string"!==typeof b.b64Pad)throw Error("Invalid b64Pad formatting option");return b}function M(a,b,e){switch(b){case "UTF8":case "UTF16BE":case "UTF16LE":break;
+default:throw Error("encoding must be UTF8, UTF16BE, or UTF16LE");}switch(a){case "HEX":a=function(b,a,d){var g=b.length,c,p,f,n,q,u;if(0!==g%2)throw Error("String of HEX type must be in byte increments");a=a||[0];d=d||0;q=d>>>3;u=-1===e?3:0;for(c=0;c<g;c+=2){p=parseInt(b.substr(c,2),16);if(isNaN(p))throw Error("String of HEX type contains invalid characters");n=(c>>>1)+q;for(f=n>>>2;a.length<=f;)a.push(0);a[f]|=p<<8*(u+n%4*e)}return{value:a,binLen:4*g+d}};break;case "TEXT":a=function(a,d,c){var g,
+l,p=0,f,n,q,u,r,t;d=d||[0];c=c||0;q=c>>>3;if("UTF8"===b)for(t=-1===e?3:0,f=0;f<a.length;f+=1)for(g=a.charCodeAt(f),l=[],128>g?l.push(g):2048>g?(l.push(192|g>>>6),l.push(128|g&63)):55296>g||57344<=g?l.push(224|g>>>12,128|g>>>6&63,128|g&63):(f+=1,g=65536+((g&1023)<<10|a.charCodeAt(f)&1023),l.push(240|g>>>18,128|g>>>12&63,128|g>>>6&63,128|g&63)),n=0;n<l.length;n+=1){r=p+q;for(u=r>>>2;d.length<=u;)d.push(0);d[u]|=l[n]<<8*(t+r%4*e);p+=1}else if("UTF16BE"===b||"UTF16LE"===b)for(t=-1===e?2:0,l="UTF16LE"===
+b&&1!==e||"UTF16LE"!==b&&1===e,f=0;f<a.length;f+=1){g=a.charCodeAt(f);!0===l&&(n=g&255,g=n<<8|g>>>8);r=p+q;for(u=r>>>2;d.length<=u;)d.push(0);d[u]|=g<<8*(t+r%4*e);p+=2}return{value:d,binLen:8*p+c}};break;case "B64":a=function(b,a,d){var c=0,l,p,f,n,q,u,r,t;if(-1===b.search(/^[a-zA-Z0-9=+\/]+$/))throw Error("Invalid character in base-64 string");p=b.indexOf("=");b=b.replace(/\=/g,"");if(-1!==p&&p<b.length)throw Error("Invalid '=' found in base-64 string");a=a||[0];d=d||0;u=d>>>3;t=-1===e?3:0;for(p=
+0;p<b.length;p+=4){q=b.substr(p,4);for(f=n=0;f<q.length;f+=1)l="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".indexOf(q.charAt(f)),n|=l<<18-6*f;for(f=0;f<q.length-1;f+=1){r=c+u;for(l=r>>>2;a.length<=l;)a.push(0);a[l]|=(n>>>16-8*f&255)<<8*(t+r%4*e);c+=1}}return{value:a,binLen:8*c+d}};break;case "BYTES":a=function(b,a,d){var c,l,p,f,n,q;a=a||[0];d=d||0;p=d>>>3;q=-1===e?3:0;for(l=0;l<b.length;l+=1)c=b.charCodeAt(l),n=l+p,f=n>>>2,a.length<=f&&a.push(0),a[f]|=c<<8*(q+n%4*e);return{value:a,
+binLen:8*b.length+d}};break;case "ARRAYBUFFER":try{a=new ArrayBuffer(0)}catch(h){throw Error("ARRAYBUFFER not supported by this environment");}a=function(b,a,d){return T(new Uint8Array(b),a,d,e)};break;case "UINT8ARRAY":try{a=new Uint8Array(0)}catch(h){throw Error("UINT8ARRAY not supported by this environment");}a=function(b,a,d){return T(b,a,d,e)};break;default:throw Error("format must be HEX, TEXT, B64, BYTES, ARRAYBUFFER, or UINT8ARRAY");}return a}function y(a,b){return a<<b|a>>>32-b}function U(d,
+b){return 32<b?(b-=32,new a(d.b<<b|d.a>>>32-b,d.a<<b|d.b>>>32-b)):0!==b?new a(d.a<<b|d.b>>>32-b,d.b<<b|d.a>>>32-b):d}function x(a,b){return a>>>b|a<<32-b}function t(d,b){var e=null,e=new a(d.a,d.b);return e=32>=b?new a(e.a>>>b|e.b<<32-b&4294967295,e.b>>>b|e.a<<32-b&4294967295):new a(e.b>>>b-32|e.a<<64-b&4294967295,e.a>>>b-32|e.b<<64-b&4294967295)}function V(d,b){var e=null;return e=32>=b?new a(d.a>>>b,d.b>>>b|d.a<<32-b&4294967295):new a(0,d.a>>>b-32)}function ca(a,b,e){return a&b^~a&e}function da(d,
+b,e){return new a(d.a&b.a^~d.a&e.a,d.b&b.b^~d.b&e.b)}function W(a,b,e){return a&b^a&e^b&e}function ea(d,b,e){return new a(d.a&b.a^d.a&e.a^b.a&e.a,d.b&b.b^d.b&e.b^b.b&e.b)}function fa(a){return x(a,2)^x(a,13)^x(a,22)}function ga(d){var b=t(d,28),e=t(d,34);d=t(d,39);return new a(b.a^e.a^d.a,b.b^e.b^d.b)}function ha(a){return x(a,6)^x(a,11)^x(a,25)}function ia(d){var b=t(d,14),e=t(d,18);d=t(d,41);return new a(b.a^e.a^d.a,b.b^e.b^d.b)}function ja(a){return x(a,7)^x(a,18)^a>>>3}function ka(d){var b=t(d,
+1),e=t(d,8);d=V(d,7);return new a(b.a^e.a^d.a,b.b^e.b^d.b)}function la(a){return x(a,17)^x(a,19)^a>>>10}function ma(d){var b=t(d,19),e=t(d,61);d=V(d,6);return new a(b.a^e.a^d.a,b.b^e.b^d.b)}function G(a,b){var e=(a&65535)+(b&65535);return((a>>>16)+(b>>>16)+(e>>>16)&65535)<<16|e&65535}function na(a,b,e,h){var c=(a&65535)+(b&65535)+(e&65535)+(h&65535);return((a>>>16)+(b>>>16)+(e>>>16)+(h>>>16)+(c>>>16)&65535)<<16|c&65535}function H(a,b,e,h,c){var m=(a&65535)+(b&65535)+(e&65535)+(h&65535)+(c&65535);
+return((a>>>16)+(b>>>16)+(e>>>16)+(h>>>16)+(c>>>16)+(m>>>16)&65535)<<16|m&65535}function oa(d,b){var e,h,c;e=(d.b&65535)+(b.b&65535);h=(d.b>>>16)+(b.b>>>16)+(e>>>16);c=(h&65535)<<16|e&65535;e=(d.a&65535)+(b.a&65535)+(h>>>16);h=(d.a>>>16)+(b.a>>>16)+(e>>>16);return new a((h&65535)<<16|e&65535,c)}function pa(d,b,e,h){var c,m,g;c=(d.b&65535)+(b.b&65535)+(e.b&65535)+(h.b&65535);m=(d.b>>>16)+(b.b>>>16)+(e.b>>>16)+(h.b>>>16)+(c>>>16);g=(m&65535)<<16|c&65535;c=(d.a&65535)+(b.a&65535)+(e.a&65535)+(h.a&65535)+
+(m>>>16);m=(d.a>>>16)+(b.a>>>16)+(e.a>>>16)+(h.a>>>16)+(c>>>16);return new a((m&65535)<<16|c&65535,g)}function qa(d,b,e,h,c){var m,g,l;m=(d.b&65535)+(b.b&65535)+(e.b&65535)+(h.b&65535)+(c.b&65535);g=(d.b>>>16)+(b.b>>>16)+(e.b>>>16)+(h.b>>>16)+(c.b>>>16)+(m>>>16);l=(g&65535)<<16|m&65535;m=(d.a&65535)+(b.a&65535)+(e.a&65535)+(h.a&65535)+(c.a&65535)+(g>>>16);g=(d.a>>>16)+(b.a>>>16)+(e.a>>>16)+(h.a>>>16)+(c.a>>>16)+(m>>>16);return new a((g&65535)<<16|m&65535,l)}function B(d,b){return new a(d.a^b.a,d.b^
+b.b)}function A(d){var b=[],e;if("SHA-1"===d)b=[1732584193,4023233417,2562383102,271733878,3285377520];else if(0===d.lastIndexOf("SHA-",0))switch(b=[3238371032,914150663,812702999,4144912697,4290775857,1750603025,1694076839,3204075428],e=[1779033703,3144134277,1013904242,2773480762,1359893119,2600822924,528734635,1541459225],d){case "SHA-224":break;case "SHA-256":b=e;break;case "SHA-384":b=[new a(3418070365,b[0]),new a(1654270250,b[1]),new a(2438529370,b[2]),new a(355462360,b[3]),new a(1731405415,
+b[4]),new a(41048885895,b[5]),new a(3675008525,b[6]),new a(1203062813,b[7])];break;case "SHA-512":b=[new a(e[0],4089235720),new a(e[1],2227873595),new a(e[2],4271175723),new a(e[3],1595750129),new a(e[4],2917565137),new a(e[5],725511199),new a(e[6],4215389547),new a(e[7],327033209)];break;default:throw Error("Unknown SHA variant");}else if(0===d.lastIndexOf("SHA3-",0)||0===d.lastIndexOf("SHAKE",0))for(d=0;5>d;d+=1)b[d]=[new a(0,0),new a(0,0),new a(0,0),new a(0,0),new a(0,0)];else throw Error("No SHA variants supported");
+return b}function K(a,b){var e=[],h,c,m,g,l,p,f;h=b[0];c=b[1];m=b[2];g=b[3];l=b[4];for(f=0;80>f;f+=1)e[f]=16>f?a[f]:y(e[f-3]^e[f-8]^e[f-14]^e[f-16],1),p=20>f?H(y(h,5),c&m^~c&g,l,1518500249,e[f]):40>f?H(y(h,5),c^m^g,l,1859775393,e[f]):60>f?H(y(h,5),W(c,m,g),l,2400959708,e[f]):H(y(h,5),c^m^g,l,3395469782,e[f]),l=g,g=m,m=y(c,30),c=h,h=p;b[0]=G(h,b[0]);b[1]=G(c,b[1]);b[2]=G(m,b[2]);b[3]=G(g,b[3]);b[4]=G(l,b[4]);return b}function ba(a,b,e,c){var k;for(k=(b+65>>>9<<4)+15;a.length<=k;)a.push(0);a[b>>>5]|=
+128<<24-b%32;b+=e;a[k]=b&4294967295;a[k-1]=b/4294967296|0;b=a.length;for(k=0;k<b;k+=16)c=K(a.slice(k,k+16),c);return c}function L(d,b,e){var h,k,m,g,l,p,f,n,q,u,r,t,v,x,y,A,z,w,F,B,C,D,E=[],J;if("SHA-224"===e||"SHA-256"===e)u=64,t=1,D=Number,v=G,x=na,y=H,A=ja,z=la,w=fa,F=ha,C=W,B=ca,J=c;else if("SHA-384"===e||"SHA-512"===e)u=80,t=2,D=a,v=oa,x=pa,y=qa,A=ka,z=ma,w=ga,F=ia,C=ea,B=da,J=X;else throw Error("Unexpected error in SHA-2 implementation");e=b[0];h=b[1];k=b[2];m=b[3];g=b[4];l=b[5];p=b[6];f=b[7];
+for(r=0;r<u;r+=1)16>r?(q=r*t,n=d.length<=q?0:d[q],q=d.length<=q+1?0:d[q+1],E[r]=new D(n,q)):E[r]=x(z(E[r-2]),E[r-7],A(E[r-15]),E[r-16]),n=y(f,F(g),B(g,l,p),J[r],E[r]),q=v(w(e),C(e,h,k)),f=p,p=l,l=g,g=v(m,n),m=k,k=h,h=e,e=v(n,q);b[0]=v(e,b[0]);b[1]=v(h,b[1]);b[2]=v(k,b[2]);b[3]=v(m,b[3]);b[4]=v(g,b[4]);b[5]=v(l,b[5]);b[6]=v(p,b[6]);b[7]=v(f,b[7]);return b}function D(d,b){var e,c,k,m,g=[],l=[];if(null!==d)for(c=0;c<d.length;c+=2)b[(c>>>1)%5][(c>>>1)/5|0]=B(b[(c>>>1)%5][(c>>>1)/5|0],new a(d[c+1],d[c]));
+for(e=0;24>e;e+=1){m=A("SHA3-");for(c=0;5>c;c+=1){k=b[c][0];var p=b[c][1],f=b[c][2],n=b[c][3],q=b[c][4];g[c]=new a(k.a^p.a^f.a^n.a^q.a,k.b^p.b^f.b^n.b^q.b)}for(c=0;5>c;c+=1)l[c]=B(g[(c+4)%5],U(g[(c+1)%5],1));for(c=0;5>c;c+=1)for(k=0;5>k;k+=1)b[c][k]=B(b[c][k],l[c]);for(c=0;5>c;c+=1)for(k=0;5>k;k+=1)m[k][(2*c+3*k)%5]=U(b[c][k],Y[c][k]);for(c=0;5>c;c+=1)for(k=0;5>k;k+=1)b[c][k]=B(m[c][k],new a(~m[(c+1)%5][k].a&m[(c+2)%5][k].a,~m[(c+1)%5][k].b&m[(c+2)%5][k].b));b[0][0]=B(b[0][0],Z[e])}return b}var c,
+X,Y,Z;c=[1116352408,1899447441,3049323471,3921009573,961987163,1508970993,2453635748,2870763221,3624381080,310598401,607225278,1426881987,1925078388,2162078206,2614888103,3248222580,3835390401,4022224774,264347078,604807628,770255983,1249150122,1555081692,1996064986,2554220882,2821834349,2952996808,3210313671,3336571891,3584528711,113926993,338241895,666307205,773529912,1294757372,1396182291,1695183700,1986661051,2177026350,2456956037,2730485921,2820302411,3259730800,3345764771,3516065817,3600352804,
+4094571909,275423344,430227734,506948616,659060556,883997877,958139571,1322822218,1537002063,1747873779,1955562222,2024104815,2227730452,2361852424,2428436474,2756734187,3204031479,3329325298];X=[new a(c[0],3609767458),new a(c[1],602891725),new a(c[2],3964484399),new a(c[3],2173295548),new a(c[4],4081628472),new a(c[5],3053834265),new a(c[6],2937671579),new a(c[7],3664609560),new a(c[8],2734883394),new a(c[9],1164996542),new a(c[10],1323610764),new a(c[11],3590304994),new a(c[12],4068182383),new a(c[13],
+991336113),new a(c[14],633803317),new a(c[15],3479774868),new a(c[16],2666613458),new a(c[17],944711139),new a(c[18],2341262773),new a(c[19],2007800933),new a(c[20],1495990901),new a(c[21],1856431235),new a(c[22],3175218132),new a(c[23],2198950837),new a(c[24],3999719339),new a(c[25],766784016),new a(c[26],2566594879),new a(c[27],3203337956),new a(c[28],1034457026),new a(c[29],2466948901),new a(c[30],3758326383),new a(c[31],168717936),new a(c[32],1188179964),new a(c[33],1546045734),new a(c[34],1522805485),
+new a(c[35],2643833823),new a(c[36],2343527390),new a(c[37],1014477480),new a(c[38],1206759142),new a(c[39],344077627),new a(c[40],1290863460),new a(c[41],3158454273),new a(c[42],3505952657),new a(c[43],106217008),new a(c[44],3606008344),new a(c[45],1432725776),new a(c[46],1467031594),new a(c[47],851169720),new a(c[48],3100823752),new a(c[49],1363258195),new a(c[50],3750685593),new a(c[51],3785050280),new a(c[52],3318307427),new a(c[53],3812723403),new a(c[54],2003034995),new a(c[55],3602036899),
+new a(c[56],1575990012),new a(c[57],1125592928),new a(c[58],2716904306),new a(c[59],442776044),new a(c[60],593698344),new a(c[61],3733110249),new a(c[62],2999351573),new a(c[63],3815920427),new a(3391569614,3928383900),new a(3515267271,566280711),new a(3940187606,3454069534),new a(4118630271,4000239992),new a(116418474,1914138554),new a(174292421,2731055270),new a(289380356,3203993006),new a(460393269,320620315),new a(685471733,587496836),new a(852142971,1086792851),new a(1017036298,365543100),new a(1126000580,
+2618297676),new a(1288033470,3409855158),new a(1501505948,4234509866),new a(1607167915,987167468),new a(1816402316,1246189591)];Z=[new a(0,1),new a(0,32898),new a(2147483648,32906),new a(2147483648,2147516416),new a(0,32907),new a(0,2147483649),new a(2147483648,2147516545),new a(2147483648,32777),new a(0,138),new a(0,136),new a(0,2147516425),new a(0,2147483658),new a(0,2147516555),new a(2147483648,139),new a(2147483648,32905),new a(2147483648,32771),new a(2147483648,32770),new a(2147483648,128),new a(0,
+32778),new a(2147483648,2147483658),new a(2147483648,2147516545),new a(2147483648,32896),new a(0,2147483649),new a(2147483648,2147516424)];Y=[[0,36,3,41,18],[1,44,10,45,2],[62,6,43,15,61],[28,55,25,21,56],[27,20,39,8,14]];"function"===typeof define&&define.amd?define(function(){return C}):"undefined"!==typeof exports?("undefined"!==typeof module&&module.exports&&(module.exports=C),exports=C):aa.jsSHA=C})(this);
 
-},{}],6:[function(require,module,exports){
+},{}],34:[function(require,module,exports){
+(function (global){(function (){
+/**
+ * Lodash (Custom Build) <https://lodash.com/>
+ * Build: `lodash modularize exports="npm" -o ./`
+ * Copyright JS Foundation and other contributors <https://js.foundation/>
+ * Released under MIT license <https://lodash.com/license>
+ * Based on Underscore.js 1.8.3 <http://underscorejs.org/LICENSE>
+ * Copyright Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
+ */
+
+/** Used as the size to enable large array optimizations. */
+var LARGE_ARRAY_SIZE = 200;
+
+/** Used to stand-in for `undefined` hash values. */
+var HASH_UNDEFINED = '__lodash_hash_undefined__';
+
+/** Used to compose bitmasks for value comparisons. */
+var COMPARE_PARTIAL_FLAG = 1,
+    COMPARE_UNORDERED_FLAG = 2;
+
+/** Used as references for various `Number` constants. */
+var MAX_SAFE_INTEGER = 9007199254740991;
+
+/** `Object#toString` result references. */
+var argsTag = '[object Arguments]',
+    arrayTag = '[object Array]',
+    asyncTag = '[object AsyncFunction]',
+    boolTag = '[object Boolean]',
+    dateTag = '[object Date]',
+    errorTag = '[object Error]',
+    funcTag = '[object Function]',
+    genTag = '[object GeneratorFunction]',
+    mapTag = '[object Map]',
+    numberTag = '[object Number]',
+    nullTag = '[object Null]',
+    objectTag = '[object Object]',
+    promiseTag = '[object Promise]',
+    proxyTag = '[object Proxy]',
+    regexpTag = '[object RegExp]',
+    setTag = '[object Set]',
+    stringTag = '[object String]',
+    symbolTag = '[object Symbol]',
+    undefinedTag = '[object Undefined]',
+    weakMapTag = '[object WeakMap]';
+
+var arrayBufferTag = '[object ArrayBuffer]',
+    dataViewTag = '[object DataView]',
+    float32Tag = '[object Float32Array]',
+    float64Tag = '[object Float64Array]',
+    int8Tag = '[object Int8Array]',
+    int16Tag = '[object Int16Array]',
+    int32Tag = '[object Int32Array]',
+    uint8Tag = '[object Uint8Array]',
+    uint8ClampedTag = '[object Uint8ClampedArray]',
+    uint16Tag = '[object Uint16Array]',
+    uint32Tag = '[object Uint32Array]';
+
+/**
+ * Used to match `RegExp`
+ * [syntax characters](http://ecma-international.org/ecma-262/7.0/#sec-patterns).
+ */
+var reRegExpChar = /[\\^$.*+?()[\]{}|]/g;
+
+/** Used to detect host constructors (Safari). */
+var reIsHostCtor = /^\[object .+?Constructor\]$/;
+
+/** Used to detect unsigned integer values. */
+var reIsUint = /^(?:0|[1-9]\d*)$/;
+
+/** Used to identify `toStringTag` values of typed arrays. */
+var typedArrayTags = {};
+typedArrayTags[float32Tag] = typedArrayTags[float64Tag] =
+typedArrayTags[int8Tag] = typedArrayTags[int16Tag] =
+typedArrayTags[int32Tag] = typedArrayTags[uint8Tag] =
+typedArrayTags[uint8ClampedTag] = typedArrayTags[uint16Tag] =
+typedArrayTags[uint32Tag] = true;
+typedArrayTags[argsTag] = typedArrayTags[arrayTag] =
+typedArrayTags[arrayBufferTag] = typedArrayTags[boolTag] =
+typedArrayTags[dataViewTag] = typedArrayTags[dateTag] =
+typedArrayTags[errorTag] = typedArrayTags[funcTag] =
+typedArrayTags[mapTag] = typedArrayTags[numberTag] =
+typedArrayTags[objectTag] = typedArrayTags[regexpTag] =
+typedArrayTags[setTag] = typedArrayTags[stringTag] =
+typedArrayTags[weakMapTag] = false;
+
+/** Detect free variable `global` from Node.js. */
+var freeGlobal = typeof global == 'object' && global && global.Object === Object && global;
+
+/** Detect free variable `self`. */
+var freeSelf = typeof self == 'object' && self && self.Object === Object && self;
+
+/** Used as a reference to the global object. */
+var root = freeGlobal || freeSelf || Function('return this')();
+
+/** Detect free variable `exports`. */
+var freeExports = typeof exports == 'object' && exports && !exports.nodeType && exports;
+
+/** Detect free variable `module`. */
+var freeModule = freeExports && typeof module == 'object' && module && !module.nodeType && module;
+
+/** Detect the popular CommonJS extension `module.exports`. */
+var moduleExports = freeModule && freeModule.exports === freeExports;
+
+/** Detect free variable `process` from Node.js. */
+var freeProcess = moduleExports && freeGlobal.process;
+
+/** Used to access faster Node.js helpers. */
+var nodeUtil = (function() {
+  try {
+    return freeProcess && freeProcess.binding && freeProcess.binding('util');
+  } catch (e) {}
+}());
+
+/* Node.js helper references. */
+var nodeIsTypedArray = nodeUtil && nodeUtil.isTypedArray;
+
+/**
+ * A specialized version of `_.filter` for arrays without support for
+ * iteratee shorthands.
+ *
+ * @private
+ * @param {Array} [array] The array to iterate over.
+ * @param {Function} predicate The function invoked per iteration.
+ * @returns {Array} Returns the new filtered array.
+ */
+function arrayFilter(array, predicate) {
+  var index = -1,
+      length = array == null ? 0 : array.length,
+      resIndex = 0,
+      result = [];
+
+  while (++index < length) {
+    var value = array[index];
+    if (predicate(value, index, array)) {
+      result[resIndex++] = value;
+    }
+  }
+  return result;
+}
+
+/**
+ * Appends the elements of `values` to `array`.
+ *
+ * @private
+ * @param {Array} array The array to modify.
+ * @param {Array} values The values to append.
+ * @returns {Array} Returns `array`.
+ */
+function arrayPush(array, values) {
+  var index = -1,
+      length = values.length,
+      offset = array.length;
+
+  while (++index < length) {
+    array[offset + index] = values[index];
+  }
+  return array;
+}
+
+/**
+ * A specialized version of `_.some` for arrays without support for iteratee
+ * shorthands.
+ *
+ * @private
+ * @param {Array} [array] The array to iterate over.
+ * @param {Function} predicate The function invoked per iteration.
+ * @returns {boolean} Returns `true` if any element passes the predicate check,
+ *  else `false`.
+ */
+function arraySome(array, predicate) {
+  var index = -1,
+      length = array == null ? 0 : array.length;
+
+  while (++index < length) {
+    if (predicate(array[index], index, array)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The base implementation of `_.times` without support for iteratee shorthands
+ * or max array length checks.
+ *
+ * @private
+ * @param {number} n The number of times to invoke `iteratee`.
+ * @param {Function} iteratee The function invoked per iteration.
+ * @returns {Array} Returns the array of results.
+ */
+function baseTimes(n, iteratee) {
+  var index = -1,
+      result = Array(n);
+
+  while (++index < n) {
+    result[index] = iteratee(index);
+  }
+  return result;
+}
+
+/**
+ * The base implementation of `_.unary` without support for storing metadata.
+ *
+ * @private
+ * @param {Function} func The function to cap arguments for.
+ * @returns {Function} Returns the new capped function.
+ */
+function baseUnary(func) {
+  return function(value) {
+    return func(value);
+  };
+}
+
+/**
+ * Checks if a `cache` value for `key` exists.
+ *
+ * @private
+ * @param {Object} cache The cache to query.
+ * @param {string} key The key of the entry to check.
+ * @returns {boolean} Returns `true` if an entry for `key` exists, else `false`.
+ */
+function cacheHas(cache, key) {
+  return cache.has(key);
+}
+
+/**
+ * Gets the value at `key` of `object`.
+ *
+ * @private
+ * @param {Object} [object] The object to query.
+ * @param {string} key The key of the property to get.
+ * @returns {*} Returns the property value.
+ */
+function getValue(object, key) {
+  return object == null ? undefined : object[key];
+}
+
+/**
+ * Converts `map` to its key-value pairs.
+ *
+ * @private
+ * @param {Object} map The map to convert.
+ * @returns {Array} Returns the key-value pairs.
+ */
+function mapToArray(map) {
+  var index = -1,
+      result = Array(map.size);
+
+  map.forEach(function(value, key) {
+    result[++index] = [key, value];
+  });
+  return result;
+}
+
+/**
+ * Creates a unary function that invokes `func` with its argument transformed.
+ *
+ * @private
+ * @param {Function} func The function to wrap.
+ * @param {Function} transform The argument transform.
+ * @returns {Function} Returns the new function.
+ */
+function overArg(func, transform) {
+  return function(arg) {
+    return func(transform(arg));
+  };
+}
+
+/**
+ * Converts `set` to an array of its values.
+ *
+ * @private
+ * @param {Object} set The set to convert.
+ * @returns {Array} Returns the values.
+ */
+function setToArray(set) {
+  var index = -1,
+      result = Array(set.size);
+
+  set.forEach(function(value) {
+    result[++index] = value;
+  });
+  return result;
+}
+
+/** Used for built-in method references. */
+var arrayProto = Array.prototype,
+    funcProto = Function.prototype,
+    objectProto = Object.prototype;
+
+/** Used to detect overreaching core-js shims. */
+var coreJsData = root['__core-js_shared__'];
+
+/** Used to resolve the decompiled source of functions. */
+var funcToString = funcProto.toString;
+
+/** Used to check objects for own properties. */
+var hasOwnProperty = objectProto.hasOwnProperty;
+
+/** Used to detect methods masquerading as native. */
+var maskSrcKey = (function() {
+  var uid = /[^.]+$/.exec(coreJsData && coreJsData.keys && coreJsData.keys.IE_PROTO || '');
+  return uid ? ('Symbol(src)_1.' + uid) : '';
+}());
+
+/**
+ * Used to resolve the
+ * [`toStringTag`](http://ecma-international.org/ecma-262/7.0/#sec-object.prototype.tostring)
+ * of values.
+ */
+var nativeObjectToString = objectProto.toString;
+
+/** Used to detect if a method is native. */
+var reIsNative = RegExp('^' +
+  funcToString.call(hasOwnProperty).replace(reRegExpChar, '\\$&')
+  .replace(/hasOwnProperty|(function).*?(?=\\\()| for .+?(?=\\\])/g, '$1.*?') + '$'
+);
+
+/** Built-in value references. */
+var Buffer = moduleExports ? root.Buffer : undefined,
+    Symbol = root.Symbol,
+    Uint8Array = root.Uint8Array,
+    propertyIsEnumerable = objectProto.propertyIsEnumerable,
+    splice = arrayProto.splice,
+    symToStringTag = Symbol ? Symbol.toStringTag : undefined;
+
+/* Built-in method references for those with the same name as other `lodash` methods. */
+var nativeGetSymbols = Object.getOwnPropertySymbols,
+    nativeIsBuffer = Buffer ? Buffer.isBuffer : undefined,
+    nativeKeys = overArg(Object.keys, Object);
+
+/* Built-in method references that are verified to be native. */
+var DataView = getNative(root, 'DataView'),
+    Map = getNative(root, 'Map'),
+    Promise = getNative(root, 'Promise'),
+    Set = getNative(root, 'Set'),
+    WeakMap = getNative(root, 'WeakMap'),
+    nativeCreate = getNative(Object, 'create');
+
+/** Used to detect maps, sets, and weakmaps. */
+var dataViewCtorString = toSource(DataView),
+    mapCtorString = toSource(Map),
+    promiseCtorString = toSource(Promise),
+    setCtorString = toSource(Set),
+    weakMapCtorString = toSource(WeakMap);
+
+/** Used to convert symbols to primitives and strings. */
+var symbolProto = Symbol ? Symbol.prototype : undefined,
+    symbolValueOf = symbolProto ? symbolProto.valueOf : undefined;
+
+/**
+ * Creates a hash object.
+ *
+ * @private
+ * @constructor
+ * @param {Array} [entries] The key-value pairs to cache.
+ */
+function Hash(entries) {
+  var index = -1,
+      length = entries == null ? 0 : entries.length;
+
+  this.clear();
+  while (++index < length) {
+    var entry = entries[index];
+    this.set(entry[0], entry[1]);
+  }
+}
+
+/**
+ * Removes all key-value entries from the hash.
+ *
+ * @private
+ * @name clear
+ * @memberOf Hash
+ */
+function hashClear() {
+  this.__data__ = nativeCreate ? nativeCreate(null) : {};
+  this.size = 0;
+}
+
+/**
+ * Removes `key` and its value from the hash.
+ *
+ * @private
+ * @name delete
+ * @memberOf Hash
+ * @param {Object} hash The hash to modify.
+ * @param {string} key The key of the value to remove.
+ * @returns {boolean} Returns `true` if the entry was removed, else `false`.
+ */
+function hashDelete(key) {
+  var result = this.has(key) && delete this.__data__[key];
+  this.size -= result ? 1 : 0;
+  return result;
+}
+
+/**
+ * Gets the hash value for `key`.
+ *
+ * @private
+ * @name get
+ * @memberOf Hash
+ * @param {string} key The key of the value to get.
+ * @returns {*} Returns the entry value.
+ */
+function hashGet(key) {
+  var data = this.__data__;
+  if (nativeCreate) {
+    var result = data[key];
+    return result === HASH_UNDEFINED ? undefined : result;
+  }
+  return hasOwnProperty.call(data, key) ? data[key] : undefined;
+}
+
+/**
+ * Checks if a hash value for `key` exists.
+ *
+ * @private
+ * @name has
+ * @memberOf Hash
+ * @param {string} key The key of the entry to check.
+ * @returns {boolean} Returns `true` if an entry for `key` exists, else `false`.
+ */
+function hashHas(key) {
+  var data = this.__data__;
+  return nativeCreate ? (data[key] !== undefined) : hasOwnProperty.call(data, key);
+}
+
+/**
+ * Sets the hash `key` to `value`.
+ *
+ * @private
+ * @name set
+ * @memberOf Hash
+ * @param {string} key The key of the value to set.
+ * @param {*} value The value to set.
+ * @returns {Object} Returns the hash instance.
+ */
+function hashSet(key, value) {
+  var data = this.__data__;
+  this.size += this.has(key) ? 0 : 1;
+  data[key] = (nativeCreate && value === undefined) ? HASH_UNDEFINED : value;
+  return this;
+}
+
+// Add methods to `Hash`.
+Hash.prototype.clear = hashClear;
+Hash.prototype['delete'] = hashDelete;
+Hash.prototype.get = hashGet;
+Hash.prototype.has = hashHas;
+Hash.prototype.set = hashSet;
+
+/**
+ * Creates an list cache object.
+ *
+ * @private
+ * @constructor
+ * @param {Array} [entries] The key-value pairs to cache.
+ */
+function ListCache(entries) {
+  var index = -1,
+      length = entries == null ? 0 : entries.length;
+
+  this.clear();
+  while (++index < length) {
+    var entry = entries[index];
+    this.set(entry[0], entry[1]);
+  }
+}
+
+/**
+ * Removes all key-value entries from the list cache.
+ *
+ * @private
+ * @name clear
+ * @memberOf ListCache
+ */
+function listCacheClear() {
+  this.__data__ = [];
+  this.size = 0;
+}
+
+/**
+ * Removes `key` and its value from the list cache.
+ *
+ * @private
+ * @name delete
+ * @memberOf ListCache
+ * @param {string} key The key of the value to remove.
+ * @returns {boolean} Returns `true` if the entry was removed, else `false`.
+ */
+function listCacheDelete(key) {
+  var data = this.__data__,
+      index = assocIndexOf(data, key);
+
+  if (index < 0) {
+    return false;
+  }
+  var lastIndex = data.length - 1;
+  if (index == lastIndex) {
+    data.pop();
+  } else {
+    splice.call(data, index, 1);
+  }
+  --this.size;
+  return true;
+}
+
+/**
+ * Gets the list cache value for `key`.
+ *
+ * @private
+ * @name get
+ * @memberOf ListCache
+ * @param {string} key The key of the value to get.
+ * @returns {*} Returns the entry value.
+ */
+function listCacheGet(key) {
+  var data = this.__data__,
+      index = assocIndexOf(data, key);
+
+  return index < 0 ? undefined : data[index][1];
+}
+
+/**
+ * Checks if a list cache value for `key` exists.
+ *
+ * @private
+ * @name has
+ * @memberOf ListCache
+ * @param {string} key The key of the entry to check.
+ * @returns {boolean} Returns `true` if an entry for `key` exists, else `false`.
+ */
+function listCacheHas(key) {
+  return assocIndexOf(this.__data__, key) > -1;
+}
+
+/**
+ * Sets the list cache `key` to `value`.
+ *
+ * @private
+ * @name set
+ * @memberOf ListCache
+ * @param {string} key The key of the value to set.
+ * @param {*} value The value to set.
+ * @returns {Object} Returns the list cache instance.
+ */
+function listCacheSet(key, value) {
+  var data = this.__data__,
+      index = assocIndexOf(data, key);
+
+  if (index < 0) {
+    ++this.size;
+    data.push([key, value]);
+  } else {
+    data[index][1] = value;
+  }
+  return this;
+}
+
+// Add methods to `ListCache`.
+ListCache.prototype.clear = listCacheClear;
+ListCache.prototype['delete'] = listCacheDelete;
+ListCache.prototype.get = listCacheGet;
+ListCache.prototype.has = listCacheHas;
+ListCache.prototype.set = listCacheSet;
+
+/**
+ * Creates a map cache object to store key-value pairs.
+ *
+ * @private
+ * @constructor
+ * @param {Array} [entries] The key-value pairs to cache.
+ */
+function MapCache(entries) {
+  var index = -1,
+      length = entries == null ? 0 : entries.length;
+
+  this.clear();
+  while (++index < length) {
+    var entry = entries[index];
+    this.set(entry[0], entry[1]);
+  }
+}
+
+/**
+ * Removes all key-value entries from the map.
+ *
+ * @private
+ * @name clear
+ * @memberOf MapCache
+ */
+function mapCacheClear() {
+  this.size = 0;
+  this.__data__ = {
+    'hash': new Hash,
+    'map': new (Map || ListCache),
+    'string': new Hash
+  };
+}
+
+/**
+ * Removes `key` and its value from the map.
+ *
+ * @private
+ * @name delete
+ * @memberOf MapCache
+ * @param {string} key The key of the value to remove.
+ * @returns {boolean} Returns `true` if the entry was removed, else `false`.
+ */
+function mapCacheDelete(key) {
+  var result = getMapData(this, key)['delete'](key);
+  this.size -= result ? 1 : 0;
+  return result;
+}
+
+/**
+ * Gets the map value for `key`.
+ *
+ * @private
+ * @name get
+ * @memberOf MapCache
+ * @param {string} key The key of the value to get.
+ * @returns {*} Returns the entry value.
+ */
+function mapCacheGet(key) {
+  return getMapData(this, key).get(key);
+}
+
+/**
+ * Checks if a map value for `key` exists.
+ *
+ * @private
+ * @name has
+ * @memberOf MapCache
+ * @param {string} key The key of the entry to check.
+ * @returns {boolean} Returns `true` if an entry for `key` exists, else `false`.
+ */
+function mapCacheHas(key) {
+  return getMapData(this, key).has(key);
+}
+
+/**
+ * Sets the map `key` to `value`.
+ *
+ * @private
+ * @name set
+ * @memberOf MapCache
+ * @param {string} key The key of the value to set.
+ * @param {*} value The value to set.
+ * @returns {Object} Returns the map cache instance.
+ */
+function mapCacheSet(key, value) {
+  var data = getMapData(this, key),
+      size = data.size;
+
+  data.set(key, value);
+  this.size += data.size == size ? 0 : 1;
+  return this;
+}
+
+// Add methods to `MapCache`.
+MapCache.prototype.clear = mapCacheClear;
+MapCache.prototype['delete'] = mapCacheDelete;
+MapCache.prototype.get = mapCacheGet;
+MapCache.prototype.has = mapCacheHas;
+MapCache.prototype.set = mapCacheSet;
+
+/**
+ *
+ * Creates an array cache object to store unique values.
+ *
+ * @private
+ * @constructor
+ * @param {Array} [values] The values to cache.
+ */
+function SetCache(values) {
+  var index = -1,
+      length = values == null ? 0 : values.length;
+
+  this.__data__ = new MapCache;
+  while (++index < length) {
+    this.add(values[index]);
+  }
+}
+
+/**
+ * Adds `value` to the array cache.
+ *
+ * @private
+ * @name add
+ * @memberOf SetCache
+ * @alias push
+ * @param {*} value The value to cache.
+ * @returns {Object} Returns the cache instance.
+ */
+function setCacheAdd(value) {
+  this.__data__.set(value, HASH_UNDEFINED);
+  return this;
+}
+
+/**
+ * Checks if `value` is in the array cache.
+ *
+ * @private
+ * @name has
+ * @memberOf SetCache
+ * @param {*} value The value to search for.
+ * @returns {number} Returns `true` if `value` is found, else `false`.
+ */
+function setCacheHas(value) {
+  return this.__data__.has(value);
+}
+
+// Add methods to `SetCache`.
+SetCache.prototype.add = SetCache.prototype.push = setCacheAdd;
+SetCache.prototype.has = setCacheHas;
+
+/**
+ * Creates a stack cache object to store key-value pairs.
+ *
+ * @private
+ * @constructor
+ * @param {Array} [entries] The key-value pairs to cache.
+ */
+function Stack(entries) {
+  var data = this.__data__ = new ListCache(entries);
+  this.size = data.size;
+}
+
+/**
+ * Removes all key-value entries from the stack.
+ *
+ * @private
+ * @name clear
+ * @memberOf Stack
+ */
+function stackClear() {
+  this.__data__ = new ListCache;
+  this.size = 0;
+}
+
+/**
+ * Removes `key` and its value from the stack.
+ *
+ * @private
+ * @name delete
+ * @memberOf Stack
+ * @param {string} key The key of the value to remove.
+ * @returns {boolean} Returns `true` if the entry was removed, else `false`.
+ */
+function stackDelete(key) {
+  var data = this.__data__,
+      result = data['delete'](key);
+
+  this.size = data.size;
+  return result;
+}
+
+/**
+ * Gets the stack value for `key`.
+ *
+ * @private
+ * @name get
+ * @memberOf Stack
+ * @param {string} key The key of the value to get.
+ * @returns {*} Returns the entry value.
+ */
+function stackGet(key) {
+  return this.__data__.get(key);
+}
+
+/**
+ * Checks if a stack value for `key` exists.
+ *
+ * @private
+ * @name has
+ * @memberOf Stack
+ * @param {string} key The key of the entry to check.
+ * @returns {boolean} Returns `true` if an entry for `key` exists, else `false`.
+ */
+function stackHas(key) {
+  return this.__data__.has(key);
+}
+
+/**
+ * Sets the stack `key` to `value`.
+ *
+ * @private
+ * @name set
+ * @memberOf Stack
+ * @param {string} key The key of the value to set.
+ * @param {*} value The value to set.
+ * @returns {Object} Returns the stack cache instance.
+ */
+function stackSet(key, value) {
+  var data = this.__data__;
+  if (data instanceof ListCache) {
+    var pairs = data.__data__;
+    if (!Map || (pairs.length < LARGE_ARRAY_SIZE - 1)) {
+      pairs.push([key, value]);
+      this.size = ++data.size;
+      return this;
+    }
+    data = this.__data__ = new MapCache(pairs);
+  }
+  data.set(key, value);
+  this.size = data.size;
+  return this;
+}
+
+// Add methods to `Stack`.
+Stack.prototype.clear = stackClear;
+Stack.prototype['delete'] = stackDelete;
+Stack.prototype.get = stackGet;
+Stack.prototype.has = stackHas;
+Stack.prototype.set = stackSet;
+
+/**
+ * Creates an array of the enumerable property names of the array-like `value`.
+ *
+ * @private
+ * @param {*} value The value to query.
+ * @param {boolean} inherited Specify returning inherited property names.
+ * @returns {Array} Returns the array of property names.
+ */
+function arrayLikeKeys(value, inherited) {
+  var isArr = isArray(value),
+      isArg = !isArr && isArguments(value),
+      isBuff = !isArr && !isArg && isBuffer(value),
+      isType = !isArr && !isArg && !isBuff && isTypedArray(value),
+      skipIndexes = isArr || isArg || isBuff || isType,
+      result = skipIndexes ? baseTimes(value.length, String) : [],
+      length = result.length;
+
+  for (var key in value) {
+    if ((inherited || hasOwnProperty.call(value, key)) &&
+        !(skipIndexes && (
+           // Safari 9 has enumerable `arguments.length` in strict mode.
+           key == 'length' ||
+           // Node.js 0.10 has enumerable non-index properties on buffers.
+           (isBuff && (key == 'offset' || key == 'parent')) ||
+           // PhantomJS 2 has enumerable non-index properties on typed arrays.
+           (isType && (key == 'buffer' || key == 'byteLength' || key == 'byteOffset')) ||
+           // Skip index properties.
+           isIndex(key, length)
+        ))) {
+      result.push(key);
+    }
+  }
+  return result;
+}
+
+/**
+ * Gets the index at which the `key` is found in `array` of key-value pairs.
+ *
+ * @private
+ * @param {Array} array The array to inspect.
+ * @param {*} key The key to search for.
+ * @returns {number} Returns the index of the matched value, else `-1`.
+ */
+function assocIndexOf(array, key) {
+  var length = array.length;
+  while (length--) {
+    if (eq(array[length][0], key)) {
+      return length;
+    }
+  }
+  return -1;
+}
+
+/**
+ * The base implementation of `getAllKeys` and `getAllKeysIn` which uses
+ * `keysFunc` and `symbolsFunc` to get the enumerable property names and
+ * symbols of `object`.
+ *
+ * @private
+ * @param {Object} object The object to query.
+ * @param {Function} keysFunc The function to get the keys of `object`.
+ * @param {Function} symbolsFunc The function to get the symbols of `object`.
+ * @returns {Array} Returns the array of property names and symbols.
+ */
+function baseGetAllKeys(object, keysFunc, symbolsFunc) {
+  var result = keysFunc(object);
+  return isArray(object) ? result : arrayPush(result, symbolsFunc(object));
+}
+
+/**
+ * The base implementation of `getTag` without fallbacks for buggy environments.
+ *
+ * @private
+ * @param {*} value The value to query.
+ * @returns {string} Returns the `toStringTag`.
+ */
+function baseGetTag(value) {
+  if (value == null) {
+    return value === undefined ? undefinedTag : nullTag;
+  }
+  return (symToStringTag && symToStringTag in Object(value))
+    ? getRawTag(value)
+    : objectToString(value);
+}
+
+/**
+ * The base implementation of `_.isArguments`.
+ *
+ * @private
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is an `arguments` object,
+ */
+function baseIsArguments(value) {
+  return isObjectLike(value) && baseGetTag(value) == argsTag;
+}
+
+/**
+ * The base implementation of `_.isEqual` which supports partial comparisons
+ * and tracks traversed objects.
+ *
+ * @private
+ * @param {*} value The value to compare.
+ * @param {*} other The other value to compare.
+ * @param {boolean} bitmask The bitmask flags.
+ *  1 - Unordered comparison
+ *  2 - Partial comparison
+ * @param {Function} [customizer] The function to customize comparisons.
+ * @param {Object} [stack] Tracks traversed `value` and `other` objects.
+ * @returns {boolean} Returns `true` if the values are equivalent, else `false`.
+ */
+function baseIsEqual(value, other, bitmask, customizer, stack) {
+  if (value === other) {
+    return true;
+  }
+  if (value == null || other == null || (!isObjectLike(value) && !isObjectLike(other))) {
+    return value !== value && other !== other;
+  }
+  return baseIsEqualDeep(value, other, bitmask, customizer, baseIsEqual, stack);
+}
+
+/**
+ * A specialized version of `baseIsEqual` for arrays and objects which performs
+ * deep comparisons and tracks traversed objects enabling objects with circular
+ * references to be compared.
+ *
+ * @private
+ * @param {Object} object The object to compare.
+ * @param {Object} other The other object to compare.
+ * @param {number} bitmask The bitmask flags. See `baseIsEqual` for more details.
+ * @param {Function} customizer The function to customize comparisons.
+ * @param {Function} equalFunc The function to determine equivalents of values.
+ * @param {Object} [stack] Tracks traversed `object` and `other` objects.
+ * @returns {boolean} Returns `true` if the objects are equivalent, else `false`.
+ */
+function baseIsEqualDeep(object, other, bitmask, customizer, equalFunc, stack) {
+  var objIsArr = isArray(object),
+      othIsArr = isArray(other),
+      objTag = objIsArr ? arrayTag : getTag(object),
+      othTag = othIsArr ? arrayTag : getTag(other);
+
+  objTag = objTag == argsTag ? objectTag : objTag;
+  othTag = othTag == argsTag ? objectTag : othTag;
+
+  var objIsObj = objTag == objectTag,
+      othIsObj = othTag == objectTag,
+      isSameTag = objTag == othTag;
+
+  if (isSameTag && isBuffer(object)) {
+    if (!isBuffer(other)) {
+      return false;
+    }
+    objIsArr = true;
+    objIsObj = false;
+  }
+  if (isSameTag && !objIsObj) {
+    stack || (stack = new Stack);
+    return (objIsArr || isTypedArray(object))
+      ? equalArrays(object, other, bitmask, customizer, equalFunc, stack)
+      : equalByTag(object, other, objTag, bitmask, customizer, equalFunc, stack);
+  }
+  if (!(bitmask & COMPARE_PARTIAL_FLAG)) {
+    var objIsWrapped = objIsObj && hasOwnProperty.call(object, '__wrapped__'),
+        othIsWrapped = othIsObj && hasOwnProperty.call(other, '__wrapped__');
+
+    if (objIsWrapped || othIsWrapped) {
+      var objUnwrapped = objIsWrapped ? object.value() : object,
+          othUnwrapped = othIsWrapped ? other.value() : other;
+
+      stack || (stack = new Stack);
+      return equalFunc(objUnwrapped, othUnwrapped, bitmask, customizer, stack);
+    }
+  }
+  if (!isSameTag) {
+    return false;
+  }
+  stack || (stack = new Stack);
+  return equalObjects(object, other, bitmask, customizer, equalFunc, stack);
+}
+
+/**
+ * The base implementation of `_.isNative` without bad shim checks.
+ *
+ * @private
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a native function,
+ *  else `false`.
+ */
+function baseIsNative(value) {
+  if (!isObject(value) || isMasked(value)) {
+    return false;
+  }
+  var pattern = isFunction(value) ? reIsNative : reIsHostCtor;
+  return pattern.test(toSource(value));
+}
+
+/**
+ * The base implementation of `_.isTypedArray` without Node.js optimizations.
+ *
+ * @private
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a typed array, else `false`.
+ */
+function baseIsTypedArray(value) {
+  return isObjectLike(value) &&
+    isLength(value.length) && !!typedArrayTags[baseGetTag(value)];
+}
+
+/**
+ * The base implementation of `_.keys` which doesn't treat sparse arrays as dense.
+ *
+ * @private
+ * @param {Object} object The object to query.
+ * @returns {Array} Returns the array of property names.
+ */
+function baseKeys(object) {
+  if (!isPrototype(object)) {
+    return nativeKeys(object);
+  }
+  var result = [];
+  for (var key in Object(object)) {
+    if (hasOwnProperty.call(object, key) && key != 'constructor') {
+      result.push(key);
+    }
+  }
+  return result;
+}
+
+/**
+ * A specialized version of `baseIsEqualDeep` for arrays with support for
+ * partial deep comparisons.
+ *
+ * @private
+ * @param {Array} array The array to compare.
+ * @param {Array} other The other array to compare.
+ * @param {number} bitmask The bitmask flags. See `baseIsEqual` for more details.
+ * @param {Function} customizer The function to customize comparisons.
+ * @param {Function} equalFunc The function to determine equivalents of values.
+ * @param {Object} stack Tracks traversed `array` and `other` objects.
+ * @returns {boolean} Returns `true` if the arrays are equivalent, else `false`.
+ */
+function equalArrays(array, other, bitmask, customizer, equalFunc, stack) {
+  var isPartial = bitmask & COMPARE_PARTIAL_FLAG,
+      arrLength = array.length,
+      othLength = other.length;
+
+  if (arrLength != othLength && !(isPartial && othLength > arrLength)) {
+    return false;
+  }
+  // Assume cyclic values are equal.
+  var stacked = stack.get(array);
+  if (stacked && stack.get(other)) {
+    return stacked == other;
+  }
+  var index = -1,
+      result = true,
+      seen = (bitmask & COMPARE_UNORDERED_FLAG) ? new SetCache : undefined;
+
+  stack.set(array, other);
+  stack.set(other, array);
+
+  // Ignore non-index properties.
+  while (++index < arrLength) {
+    var arrValue = array[index],
+        othValue = other[index];
+
+    if (customizer) {
+      var compared = isPartial
+        ? customizer(othValue, arrValue, index, other, array, stack)
+        : customizer(arrValue, othValue, index, array, other, stack);
+    }
+    if (compared !== undefined) {
+      if (compared) {
+        continue;
+      }
+      result = false;
+      break;
+    }
+    // Recursively compare arrays (susceptible to call stack limits).
+    if (seen) {
+      if (!arraySome(other, function(othValue, othIndex) {
+            if (!cacheHas(seen, othIndex) &&
+                (arrValue === othValue || equalFunc(arrValue, othValue, bitmask, customizer, stack))) {
+              return seen.push(othIndex);
+            }
+          })) {
+        result = false;
+        break;
+      }
+    } else if (!(
+          arrValue === othValue ||
+            equalFunc(arrValue, othValue, bitmask, customizer, stack)
+        )) {
+      result = false;
+      break;
+    }
+  }
+  stack['delete'](array);
+  stack['delete'](other);
+  return result;
+}
+
+/**
+ * A specialized version of `baseIsEqualDeep` for comparing objects of
+ * the same `toStringTag`.
+ *
+ * **Note:** This function only supports comparing values with tags of
+ * `Boolean`, `Date`, `Error`, `Number`, `RegExp`, or `String`.
+ *
+ * @private
+ * @param {Object} object The object to compare.
+ * @param {Object} other The other object to compare.
+ * @param {string} tag The `toStringTag` of the objects to compare.
+ * @param {number} bitmask The bitmask flags. See `baseIsEqual` for more details.
+ * @param {Function} customizer The function to customize comparisons.
+ * @param {Function} equalFunc The function to determine equivalents of values.
+ * @param {Object} stack Tracks traversed `object` and `other` objects.
+ * @returns {boolean} Returns `true` if the objects are equivalent, else `false`.
+ */
+function equalByTag(object, other, tag, bitmask, customizer, equalFunc, stack) {
+  switch (tag) {
+    case dataViewTag:
+      if ((object.byteLength != other.byteLength) ||
+          (object.byteOffset != other.byteOffset)) {
+        return false;
+      }
+      object = object.buffer;
+      other = other.buffer;
+
+    case arrayBufferTag:
+      if ((object.byteLength != other.byteLength) ||
+          !equalFunc(new Uint8Array(object), new Uint8Array(other))) {
+        return false;
+      }
+      return true;
+
+    case boolTag:
+    case dateTag:
+    case numberTag:
+      // Coerce booleans to `1` or `0` and dates to milliseconds.
+      // Invalid dates are coerced to `NaN`.
+      return eq(+object, +other);
+
+    case errorTag:
+      return object.name == other.name && object.message == other.message;
+
+    case regexpTag:
+    case stringTag:
+      // Coerce regexes to strings and treat strings, primitives and objects,
+      // as equal. See http://www.ecma-international.org/ecma-262/7.0/#sec-regexp.prototype.tostring
+      // for more details.
+      return object == (other + '');
+
+    case mapTag:
+      var convert = mapToArray;
+
+    case setTag:
+      var isPartial = bitmask & COMPARE_PARTIAL_FLAG;
+      convert || (convert = setToArray);
+
+      if (object.size != other.size && !isPartial) {
+        return false;
+      }
+      // Assume cyclic values are equal.
+      var stacked = stack.get(object);
+      if (stacked) {
+        return stacked == other;
+      }
+      bitmask |= COMPARE_UNORDERED_FLAG;
+
+      // Recursively compare objects (susceptible to call stack limits).
+      stack.set(object, other);
+      var result = equalArrays(convert(object), convert(other), bitmask, customizer, equalFunc, stack);
+      stack['delete'](object);
+      return result;
+
+    case symbolTag:
+      if (symbolValueOf) {
+        return symbolValueOf.call(object) == symbolValueOf.call(other);
+      }
+  }
+  return false;
+}
+
+/**
+ * A specialized version of `baseIsEqualDeep` for objects with support for
+ * partial deep comparisons.
+ *
+ * @private
+ * @param {Object} object The object to compare.
+ * @param {Object} other The other object to compare.
+ * @param {number} bitmask The bitmask flags. See `baseIsEqual` for more details.
+ * @param {Function} customizer The function to customize comparisons.
+ * @param {Function} equalFunc The function to determine equivalents of values.
+ * @param {Object} stack Tracks traversed `object` and `other` objects.
+ * @returns {boolean} Returns `true` if the objects are equivalent, else `false`.
+ */
+function equalObjects(object, other, bitmask, customizer, equalFunc, stack) {
+  var isPartial = bitmask & COMPARE_PARTIAL_FLAG,
+      objProps = getAllKeys(object),
+      objLength = objProps.length,
+      othProps = getAllKeys(other),
+      othLength = othProps.length;
+
+  if (objLength != othLength && !isPartial) {
+    return false;
+  }
+  var index = objLength;
+  while (index--) {
+    var key = objProps[index];
+    if (!(isPartial ? key in other : hasOwnProperty.call(other, key))) {
+      return false;
+    }
+  }
+  // Assume cyclic values are equal.
+  var stacked = stack.get(object);
+  if (stacked && stack.get(other)) {
+    return stacked == other;
+  }
+  var result = true;
+  stack.set(object, other);
+  stack.set(other, object);
+
+  var skipCtor = isPartial;
+  while (++index < objLength) {
+    key = objProps[index];
+    var objValue = object[key],
+        othValue = other[key];
+
+    if (customizer) {
+      var compared = isPartial
+        ? customizer(othValue, objValue, key, other, object, stack)
+        : customizer(objValue, othValue, key, object, other, stack);
+    }
+    // Recursively compare objects (susceptible to call stack limits).
+    if (!(compared === undefined
+          ? (objValue === othValue || equalFunc(objValue, othValue, bitmask, customizer, stack))
+          : compared
+        )) {
+      result = false;
+      break;
+    }
+    skipCtor || (skipCtor = key == 'constructor');
+  }
+  if (result && !skipCtor) {
+    var objCtor = object.constructor,
+        othCtor = other.constructor;
+
+    // Non `Object` object instances with different constructors are not equal.
+    if (objCtor != othCtor &&
+        ('constructor' in object && 'constructor' in other) &&
+        !(typeof objCtor == 'function' && objCtor instanceof objCtor &&
+          typeof othCtor == 'function' && othCtor instanceof othCtor)) {
+      result = false;
+    }
+  }
+  stack['delete'](object);
+  stack['delete'](other);
+  return result;
+}
+
+/**
+ * Creates an array of own enumerable property names and symbols of `object`.
+ *
+ * @private
+ * @param {Object} object The object to query.
+ * @returns {Array} Returns the array of property names and symbols.
+ */
+function getAllKeys(object) {
+  return baseGetAllKeys(object, keys, getSymbols);
+}
+
+/**
+ * Gets the data for `map`.
+ *
+ * @private
+ * @param {Object} map The map to query.
+ * @param {string} key The reference key.
+ * @returns {*} Returns the map data.
+ */
+function getMapData(map, key) {
+  var data = map.__data__;
+  return isKeyable(key)
+    ? data[typeof key == 'string' ? 'string' : 'hash']
+    : data.map;
+}
+
+/**
+ * Gets the native function at `key` of `object`.
+ *
+ * @private
+ * @param {Object} object The object to query.
+ * @param {string} key The key of the method to get.
+ * @returns {*} Returns the function if it's native, else `undefined`.
+ */
+function getNative(object, key) {
+  var value = getValue(object, key);
+  return baseIsNative(value) ? value : undefined;
+}
+
+/**
+ * A specialized version of `baseGetTag` which ignores `Symbol.toStringTag` values.
+ *
+ * @private
+ * @param {*} value The value to query.
+ * @returns {string} Returns the raw `toStringTag`.
+ */
+function getRawTag(value) {
+  var isOwn = hasOwnProperty.call(value, symToStringTag),
+      tag = value[symToStringTag];
+
+  try {
+    value[symToStringTag] = undefined;
+    var unmasked = true;
+  } catch (e) {}
+
+  var result = nativeObjectToString.call(value);
+  if (unmasked) {
+    if (isOwn) {
+      value[symToStringTag] = tag;
+    } else {
+      delete value[symToStringTag];
+    }
+  }
+  return result;
+}
+
+/**
+ * Creates an array of the own enumerable symbols of `object`.
+ *
+ * @private
+ * @param {Object} object The object to query.
+ * @returns {Array} Returns the array of symbols.
+ */
+var getSymbols = !nativeGetSymbols ? stubArray : function(object) {
+  if (object == null) {
+    return [];
+  }
+  object = Object(object);
+  return arrayFilter(nativeGetSymbols(object), function(symbol) {
+    return propertyIsEnumerable.call(object, symbol);
+  });
+};
+
+/**
+ * Gets the `toStringTag` of `value`.
+ *
+ * @private
+ * @param {*} value The value to query.
+ * @returns {string} Returns the `toStringTag`.
+ */
+var getTag = baseGetTag;
+
+// Fallback for data views, maps, sets, and weak maps in IE 11 and promises in Node.js < 6.
+if ((DataView && getTag(new DataView(new ArrayBuffer(1))) != dataViewTag) ||
+    (Map && getTag(new Map) != mapTag) ||
+    (Promise && getTag(Promise.resolve()) != promiseTag) ||
+    (Set && getTag(new Set) != setTag) ||
+    (WeakMap && getTag(new WeakMap) != weakMapTag)) {
+  getTag = function(value) {
+    var result = baseGetTag(value),
+        Ctor = result == objectTag ? value.constructor : undefined,
+        ctorString = Ctor ? toSource(Ctor) : '';
+
+    if (ctorString) {
+      switch (ctorString) {
+        case dataViewCtorString: return dataViewTag;
+        case mapCtorString: return mapTag;
+        case promiseCtorString: return promiseTag;
+        case setCtorString: return setTag;
+        case weakMapCtorString: return weakMapTag;
+      }
+    }
+    return result;
+  };
+}
+
+/**
+ * Checks if `value` is a valid array-like index.
+ *
+ * @private
+ * @param {*} value The value to check.
+ * @param {number} [length=MAX_SAFE_INTEGER] The upper bounds of a valid index.
+ * @returns {boolean} Returns `true` if `value` is a valid index, else `false`.
+ */
+function isIndex(value, length) {
+  length = length == null ? MAX_SAFE_INTEGER : length;
+  return !!length &&
+    (typeof value == 'number' || reIsUint.test(value)) &&
+    (value > -1 && value % 1 == 0 && value < length);
+}
+
+/**
+ * Checks if `value` is suitable for use as unique object key.
+ *
+ * @private
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is suitable, else `false`.
+ */
+function isKeyable(value) {
+  var type = typeof value;
+  return (type == 'string' || type == 'number' || type == 'symbol' || type == 'boolean')
+    ? (value !== '__proto__')
+    : (value === null);
+}
+
+/**
+ * Checks if `func` has its source masked.
+ *
+ * @private
+ * @param {Function} func The function to check.
+ * @returns {boolean} Returns `true` if `func` is masked, else `false`.
+ */
+function isMasked(func) {
+  return !!maskSrcKey && (maskSrcKey in func);
+}
+
+/**
+ * Checks if `value` is likely a prototype object.
+ *
+ * @private
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a prototype, else `false`.
+ */
+function isPrototype(value) {
+  var Ctor = value && value.constructor,
+      proto = (typeof Ctor == 'function' && Ctor.prototype) || objectProto;
+
+  return value === proto;
+}
+
+/**
+ * Converts `value` to a string using `Object.prototype.toString`.
+ *
+ * @private
+ * @param {*} value The value to convert.
+ * @returns {string} Returns the converted string.
+ */
+function objectToString(value) {
+  return nativeObjectToString.call(value);
+}
+
+/**
+ * Converts `func` to its source code.
+ *
+ * @private
+ * @param {Function} func The function to convert.
+ * @returns {string} Returns the source code.
+ */
+function toSource(func) {
+  if (func != null) {
+    try {
+      return funcToString.call(func);
+    } catch (e) {}
+    try {
+      return (func + '');
+    } catch (e) {}
+  }
+  return '';
+}
+
+/**
+ * Performs a
+ * [`SameValueZero`](http://ecma-international.org/ecma-262/7.0/#sec-samevaluezero)
+ * comparison between two values to determine if they are equivalent.
+ *
+ * @static
+ * @memberOf _
+ * @since 4.0.0
+ * @category Lang
+ * @param {*} value The value to compare.
+ * @param {*} other The other value to compare.
+ * @returns {boolean} Returns `true` if the values are equivalent, else `false`.
+ * @example
+ *
+ * var object = { 'a': 1 };
+ * var other = { 'a': 1 };
+ *
+ * _.eq(object, object);
+ * // => true
+ *
+ * _.eq(object, other);
+ * // => false
+ *
+ * _.eq('a', 'a');
+ * // => true
+ *
+ * _.eq('a', Object('a'));
+ * // => false
+ *
+ * _.eq(NaN, NaN);
+ * // => true
+ */
+function eq(value, other) {
+  return value === other || (value !== value && other !== other);
+}
+
+/**
+ * Checks if `value` is likely an `arguments` object.
+ *
+ * @static
+ * @memberOf _
+ * @since 0.1.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is an `arguments` object,
+ *  else `false`.
+ * @example
+ *
+ * _.isArguments(function() { return arguments; }());
+ * // => true
+ *
+ * _.isArguments([1, 2, 3]);
+ * // => false
+ */
+var isArguments = baseIsArguments(function() { return arguments; }()) ? baseIsArguments : function(value) {
+  return isObjectLike(value) && hasOwnProperty.call(value, 'callee') &&
+    !propertyIsEnumerable.call(value, 'callee');
+};
+
+/**
+ * Checks if `value` is classified as an `Array` object.
+ *
+ * @static
+ * @memberOf _
+ * @since 0.1.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is an array, else `false`.
+ * @example
+ *
+ * _.isArray([1, 2, 3]);
+ * // => true
+ *
+ * _.isArray(document.body.children);
+ * // => false
+ *
+ * _.isArray('abc');
+ * // => false
+ *
+ * _.isArray(_.noop);
+ * // => false
+ */
+var isArray = Array.isArray;
+
+/**
+ * Checks if `value` is array-like. A value is considered array-like if it's
+ * not a function and has a `value.length` that's an integer greater than or
+ * equal to `0` and less than or equal to `Number.MAX_SAFE_INTEGER`.
+ *
+ * @static
+ * @memberOf _
+ * @since 4.0.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is array-like, else `false`.
+ * @example
+ *
+ * _.isArrayLike([1, 2, 3]);
+ * // => true
+ *
+ * _.isArrayLike(document.body.children);
+ * // => true
+ *
+ * _.isArrayLike('abc');
+ * // => true
+ *
+ * _.isArrayLike(_.noop);
+ * // => false
+ */
+function isArrayLike(value) {
+  return value != null && isLength(value.length) && !isFunction(value);
+}
+
+/**
+ * Checks if `value` is a buffer.
+ *
+ * @static
+ * @memberOf _
+ * @since 4.3.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a buffer, else `false`.
+ * @example
+ *
+ * _.isBuffer(new Buffer(2));
+ * // => true
+ *
+ * _.isBuffer(new Uint8Array(2));
+ * // => false
+ */
+var isBuffer = nativeIsBuffer || stubFalse;
+
+/**
+ * Performs a deep comparison between two values to determine if they are
+ * equivalent.
+ *
+ * **Note:** This method supports comparing arrays, array buffers, booleans,
+ * date objects, error objects, maps, numbers, `Object` objects, regexes,
+ * sets, strings, symbols, and typed arrays. `Object` objects are compared
+ * by their own, not inherited, enumerable properties. Functions and DOM
+ * nodes are compared by strict equality, i.e. `===`.
+ *
+ * @static
+ * @memberOf _
+ * @since 0.1.0
+ * @category Lang
+ * @param {*} value The value to compare.
+ * @param {*} other The other value to compare.
+ * @returns {boolean} Returns `true` if the values are equivalent, else `false`.
+ * @example
+ *
+ * var object = { 'a': 1 };
+ * var other = { 'a': 1 };
+ *
+ * _.isEqual(object, other);
+ * // => true
+ *
+ * object === other;
+ * // => false
+ */
+function isEqual(value, other) {
+  return baseIsEqual(value, other);
+}
+
+/**
+ * Checks if `value` is classified as a `Function` object.
+ *
+ * @static
+ * @memberOf _
+ * @since 0.1.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a function, else `false`.
+ * @example
+ *
+ * _.isFunction(_);
+ * // => true
+ *
+ * _.isFunction(/abc/);
+ * // => false
+ */
+function isFunction(value) {
+  if (!isObject(value)) {
+    return false;
+  }
+  // The use of `Object#toString` avoids issues with the `typeof` operator
+  // in Safari 9 which returns 'object' for typed arrays and other constructors.
+  var tag = baseGetTag(value);
+  return tag == funcTag || tag == genTag || tag == asyncTag || tag == proxyTag;
+}
+
+/**
+ * Checks if `value` is a valid array-like length.
+ *
+ * **Note:** This method is loosely based on
+ * [`ToLength`](http://ecma-international.org/ecma-262/7.0/#sec-tolength).
+ *
+ * @static
+ * @memberOf _
+ * @since 4.0.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a valid length, else `false`.
+ * @example
+ *
+ * _.isLength(3);
+ * // => true
+ *
+ * _.isLength(Number.MIN_VALUE);
+ * // => false
+ *
+ * _.isLength(Infinity);
+ * // => false
+ *
+ * _.isLength('3');
+ * // => false
+ */
+function isLength(value) {
+  return typeof value == 'number' &&
+    value > -1 && value % 1 == 0 && value <= MAX_SAFE_INTEGER;
+}
+
+/**
+ * Checks if `value` is the
+ * [language type](http://www.ecma-international.org/ecma-262/7.0/#sec-ecmascript-language-types)
+ * of `Object`. (e.g. arrays, functions, objects, regexes, `new Number(0)`, and `new String('')`)
+ *
+ * @static
+ * @memberOf _
+ * @since 0.1.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is an object, else `false`.
+ * @example
+ *
+ * _.isObject({});
+ * // => true
+ *
+ * _.isObject([1, 2, 3]);
+ * // => true
+ *
+ * _.isObject(_.noop);
+ * // => true
+ *
+ * _.isObject(null);
+ * // => false
+ */
+function isObject(value) {
+  var type = typeof value;
+  return value != null && (type == 'object' || type == 'function');
+}
+
+/**
+ * Checks if `value` is object-like. A value is object-like if it's not `null`
+ * and has a `typeof` result of "object".
+ *
+ * @static
+ * @memberOf _
+ * @since 4.0.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is object-like, else `false`.
+ * @example
+ *
+ * _.isObjectLike({});
+ * // => true
+ *
+ * _.isObjectLike([1, 2, 3]);
+ * // => true
+ *
+ * _.isObjectLike(_.noop);
+ * // => false
+ *
+ * _.isObjectLike(null);
+ * // => false
+ */
+function isObjectLike(value) {
+  return value != null && typeof value == 'object';
+}
+
+/**
+ * Checks if `value` is classified as a typed array.
+ *
+ * @static
+ * @memberOf _
+ * @since 3.0.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a typed array, else `false`.
+ * @example
+ *
+ * _.isTypedArray(new Uint8Array);
+ * // => true
+ *
+ * _.isTypedArray([]);
+ * // => false
+ */
+var isTypedArray = nodeIsTypedArray ? baseUnary(nodeIsTypedArray) : baseIsTypedArray;
+
+/**
+ * Creates an array of the own enumerable property names of `object`.
+ *
+ * **Note:** Non-object values are coerced to objects. See the
+ * [ES spec](http://ecma-international.org/ecma-262/7.0/#sec-object.keys)
+ * for more details.
+ *
+ * @static
+ * @since 0.1.0
+ * @memberOf _
+ * @category Object
+ * @param {Object} object The object to query.
+ * @returns {Array} Returns the array of property names.
+ * @example
+ *
+ * function Foo() {
+ *   this.a = 1;
+ *   this.b = 2;
+ * }
+ *
+ * Foo.prototype.c = 3;
+ *
+ * _.keys(new Foo);
+ * // => ['a', 'b'] (iteration order is not guaranteed)
+ *
+ * _.keys('hi');
+ * // => ['0', '1']
+ */
+function keys(object) {
+  return isArrayLike(object) ? arrayLikeKeys(object) : baseKeys(object);
+}
+
+/**
+ * This method returns a new empty array.
+ *
+ * @static
+ * @memberOf _
+ * @since 4.13.0
+ * @category Util
+ * @returns {Array} Returns the new empty array.
+ * @example
+ *
+ * var arrays = _.times(2, _.stubArray);
+ *
+ * console.log(arrays);
+ * // => [[], []]
+ *
+ * console.log(arrays[0] === arrays[1]);
+ * // => false
+ */
+function stubArray() {
+  return [];
+}
+
+/**
+ * This method returns `false`.
+ *
+ * @static
+ * @memberOf _
+ * @since 4.13.0
+ * @category Util
+ * @returns {boolean} Returns `false`.
+ * @example
+ *
+ * _.times(2, _.stubFalse);
+ * // => [false, false]
+ */
+function stubFalse() {
+  return false;
+}
+
+module.exports = isEqual;
+
+}).call(this)}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{}],35:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
@@ -2380,7 +8225,7 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],7:[function(require,module,exports){
+},{}],36:[function(require,module,exports){
 /* eslint-disable node/no-deprecated-api */
 var buffer = require('buffer')
 var Buffer = buffer.Buffer
@@ -2402,8 +8247,6 @@ if (Buffer.from && Buffer.alloc && Buffer.allocUnsafe && Buffer.allocUnsafeSlow)
 function SafeBuffer (arg, encodingOrOffset, length) {
   return Buffer(arg, encodingOrOffset, length)
 }
-
-SafeBuffer.prototype = Object.create(Buffer.prototype)
 
 // Copy static methods from Buffer
 copyProps(Buffer, SafeBuffer)
@@ -2446,18 +8289,198 @@ SafeBuffer.allocUnsafeSlow = function (size) {
   return buffer.SlowBuffer(size)
 }
 
-},{"buffer":3}],8:[function(require,module,exports){
+},{"buffer":4}],37:[function(require,module,exports){
+var cbor = require('cbor-js');
+var CRC = require('crc');
+var base58 = require('./crypto/base58');
+var BIP173Validator = require('./bip173_validator')
+
+function getDecoded(address) {
+    try {
+        var decoded = base58.decode(address);
+        return cbor.decode(new Uint8Array(decoded).buffer);
+    } catch (e) {
+        // if decoding fails, assume invalid address
+        return null;
+    }
+}
+
+function isValidAddressV1(address) {
+    var decoded = getDecoded(address);
+
+    if (!decoded || (!Array.isArray(decoded) && decoded.length != 2)) {
+        return false;
+    }
+
+    var tagged = decoded[0];
+    var validCrc = decoded[1];
+    if (typeof (validCrc) != 'number') {
+        return false;
+    }
+
+    // get crc of the payload
+    var crc = CRC.crc32(tagged);
+
+    return crc == validCrc;
+}
+
+function isValidAddressShelley(address, currency, opts) {
+    // shelley address are just bip 173 - bech32 addresses (https://cips.cardano.org/cips/cip4/)
+    return BIP173Validator.isValidAddress(address, currency, opts);
+}
+
 module.exports = {
-  isValidAddress: function (address) {
-      var binanceAddress = address.slice(address.indexOf('bnb'));
-      if (binanceAddress.length !== 42) {
-          return false;
-      }
-      return true;
-  },
+    isValidAddress: function (address, currency, opts = {}) {
+        return isValidAddressV1(address) || isValidAddressShelley(address, currency, opts);
+    }
 };
 
-},{}],9:[function(require,module,exports){
+},{"./bip173_validator":41,"./crypto/base58":44,"cbor-js":5,"crc":30}],38:[function(require,module,exports){
+const cryptoUtils = require('./crypto/utils');
+
+const ALGORAND_CHECKSUM_BYTE_LENGTH = 4;
+const ALGORAND_ADDRESS_LENGTH = 58;
+
+module.exports = {
+    isValidAddress: function (address, currency, opts = {}) {
+        const { networkType = 'prod' } = opts;
+
+        return this.verifyChecksum(address)
+    },
+
+    verifyChecksum: function (address) {
+        if (address.length !== ALGORAND_ADDRESS_LENGTH) {
+            return false
+        } else {
+            // Decode base32 Address
+            const decoded = cryptoUtils.base32.b32decode(address);
+            const addr = decoded.slice(0, decoded.length - ALGORAND_CHECKSUM_BYTE_LENGTH)
+            const checksum = cryptoUtils.byteArray2hexStr(decoded.slice(-4)).toString('HEX')
+
+            // Hash Address - Checksum
+            const code = cryptoUtils.sha512_256(cryptoUtils.byteArray2hexStr(addr)).substr(-ALGORAND_CHECKSUM_BYTE_LENGTH * 2);
+
+            return code === checksum
+        }
+    }
+}
+
+},{"./crypto/utils":52}],39:[function(require,module,exports){
+const base58 = require('./crypto/base58');
+
+// simple base58 validator.  Just checks if it can be decoded.
+module.exports = {
+    isValidAddress: function (address, currency, opts = {}) {
+        try {
+            if (!address || address.length == 0) {
+                return false;
+            }
+
+            if (currency.minLength && (address.length < currency.minLength)) {
+                return false;
+            }
+
+            if (currency.maxLength && (address.length > currency.maxLength)) {
+                return false;
+            }
+            try {
+                const decoded = base58.decode(address);
+                if (!decoded || !decoded.length) {
+                    return false;
+                }
+            } catch (e) {
+                // if decoding fails, assume invalid address
+                return false;
+            }
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+};
+
+},{"./crypto/base58":44}],40:[function(require,module,exports){
+var cryptoUtils = require('./crypto/utils');
+var bech32 = require('./crypto/bech32');
+var BTCValidator = require('./bitcoin_validator');
+
+function validateAddress(address, currency, opts) {
+    var networkType = opts ? opts.networkType : ''
+    var prefix = 'bitcoincash';
+    var regexp = new RegExp(currency.regexp);
+    var raw_address;
+
+    var res = address.split(':');
+    if (res.length === 1) {
+        raw_address = address
+    } else {
+        if (res[0] !== 'bitcoincash') {
+            return false;
+        }
+        raw_address = res[1];
+    }
+
+    if (!regexp.test(raw_address)) {
+        return false;
+    }
+
+    if (raw_address.toLowerCase() != raw_address && raw_address.toUpperCase() != raw_address) {
+        return false;
+    }
+
+    var decoded = cryptoUtils.base32.b32decode(raw_address);
+    if (networkType === 'testnet') {
+        prefix = 'bchtest';
+    }
+
+    try {
+        if (bech32.verifyChecksum(prefix, decoded, bech32.encodings.BECH32)) {
+            return false;
+        }
+    } catch(e) {
+        return false;
+    }
+    return true;
+}
+
+module.exports = {
+    isValidAddress: function (address, currency, networkType) {
+        return validateAddress(address, currency, networkType) || BTCValidator.isValidAddress(address, currency, networkType);
+    }
+}
+
+},{"./bitcoin_validator":42,"./crypto/bech32":45,"./crypto/utils":52}],41:[function(require,module,exports){
+var bech32 = require('./crypto/bech32');
+
+// bip 173 bech 32 addresses (https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki)
+module.exports = {
+    isValidAddress: function (address, currency, opts = {}) {
+        const { networkType = 'prod' } = opts;
+        const decoded = bech32.decode(address, bech32.encodings.BECH32);
+        if (!decoded) {
+            return false;
+        }
+
+        const bech32Hrp = decoded.hrp;
+        let correctBech32Hrps;
+        if (networkType === 'prod' || networkType === 'testnet') {
+            correctBech32Hrps = currency.bech32Hrp[networkType];
+        } else if (currency.bech32Hrp) {
+            correctBech32Hrps = currency.bech32Hrp.prod.concat(currency.bech32Hrp.testnet)
+        } else {
+            return false;
+        }
+
+        if (correctBech32Hrps.indexOf(bech32Hrp) === -1) {
+            return false;
+        }
+
+        return true;
+    }
+};
+
+},{"./crypto/bech32":45}],42:[function(require,module,exports){
+(function (Buffer){(function (){
 var base58 = require('./crypto/base58');
 var segwit = require('./crypto/segwit_addr');
 var cryptoUtils = require('./crypto/utils');
@@ -2476,9 +8499,14 @@ function getDecoded(address) {
 function getChecksum(hashFunction, payload) {
     // Each currency may implement different hashing algorithm
     switch (hashFunction) {
+        // blake then keccak hash chain
+        case 'blake256keccak256':
+            var blake = cryptoUtils.blake2b256(payload);
+            return cryptoUtils.keccak256Checksum(Buffer.from(blake, 'hex'));
         case 'blake256':
             return cryptoUtils.blake256Checksum(payload);
-            break;
+        case 'keccak256':
+            return cryptoUtils.keccak256Checksum(payload);
         case 'sha256':
         default:
             return cryptoUtils.sha256Checksum(payload);
@@ -2499,6 +8527,12 @@ function getAddressType(address, currency) {
             return null;
         }
 
+        if(currency.regex) {
+            if(!currency.regex.test(address)) {
+                return false;
+            }
+        }
+
         var checksum = cryptoUtils.toHex(decoded.slice(length - 4, length)),
             body = cryptoUtils.toHex(decoded.slice(0, length - 4)),
             goodChecksum = getChecksum(hashFunction, body);
@@ -2509,8 +8543,8 @@ function getAddressType(address, currency) {
     return null;
 }
 
-function isValidP2PKHandP2SHAddress(address, currency, networkType) {
-    networkType = networkType || DEFAULT_NETWORK_TYPE;
+function isValidP2PKHandP2SHAddress(address, currency, opts) {
+    const { networkType = DEFAULT_NETWORK_TYPE} = opts;
 
     var correctAddressTypes;
     var addressType = getAddressType(address, currency);
@@ -2518,8 +8552,10 @@ function isValidP2PKHandP2SHAddress(address, currency, networkType) {
     if (addressType) {
         if (networkType === 'prod' || networkType === 'testnet') {
             correctAddressTypes = currency.addressTypes[networkType]
-        } else {
+        } else if (currency.addressTypes) {
             correctAddressTypes = currency.addressTypes.prod.concat(currency.addressTypes.testnet);
+        } else {
+            return false;
         }
 
         return correctAddressTypes.indexOf(addressType) >= 0;
@@ -2529,12 +8565,80 @@ function isValidP2PKHandP2SHAddress(address, currency, networkType) {
 }
 
 module.exports = {
-    isValidAddress: function (address, currency, networkType) {
-        return isValidP2PKHandP2SHAddress(address, currency, networkType) || segwit.isValidAddress(address, currency.segwitHrp);
+    isValidAddress: function (address, currency, opts = {}) {
+        return isValidP2PKHandP2SHAddress(address, currency, opts) || segwit.isValidAddress(address, currency, opts);
     }
 };
 
-},{"./crypto/base58":10,"./crypto/segwit_addr":16,"./crypto/utils":18}],10:[function(require,module,exports){
+}).call(this)}).call(this,require("buffer").Buffer)
+},{"./crypto/base58":44,"./crypto/segwit_addr":50,"./crypto/utils":52,"buffer":4}],43:[function(require,module,exports){
+var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+ /**
+* Encode a string to base32
+*/
+var b32encode = function(s) {
+    var parts = [];
+    var quanta = Math.floor((s.length / 5));
+    var leftover = s.length % 5;
+
+     if (leftover != 0) {
+        for (var i = 0; i < (5 - leftover); i++) {
+            s += '\x00';
+        }
+        quanta += 1;
+    }
+
+     for (var i = 0; i < quanta; i++) {
+        parts.push(alphabet.charAt(s.charCodeAt(i * 5) >> 3));
+        parts.push(alphabet.charAt(((s.charCodeAt(i * 5) & 0x07) << 2) | (s.charCodeAt(i * 5 + 1) >> 6)));
+        parts.push(alphabet.charAt(((s.charCodeAt(i * 5 + 1) & 0x3F) >> 1)));
+        parts.push(alphabet.charAt(((s.charCodeAt(i * 5 + 1) & 0x01) << 4) | (s.charCodeAt(i * 5 + 2) >> 4)));
+        parts.push(alphabet.charAt(((s.charCodeAt(i * 5 + 2) & 0x0F) << 1) | (s.charCodeAt(i * 5 + 3) >> 7)));
+        parts.push(alphabet.charAt(((s.charCodeAt(i * 5 + 3) & 0x7F) >> 2)));
+        parts.push(alphabet.charAt(((s.charCodeAt(i * 5 + 3) & 0x03) << 3) | (s.charCodeAt(i * 5 + 4) >> 5)));
+        parts.push(alphabet.charAt(((s.charCodeAt(i * 5 + 4) & 0x1F))));
+    }
+
+     var replace = 0;
+    if (leftover == 1) replace = 6;
+    else if (leftover == 2) replace = 4;
+    else if (leftover == 3) replace = 3;
+    else if (leftover == 4) replace = 1;
+
+     for (var i = 0; i < replace; i++) parts.pop();
+    for (var i = 0; i < replace; i++) parts.push("=");
+
+     return parts.join("");
+}
+
+/**
+* Decode a base32 string.
+* This is made specifically for our use, deals only with proper strings
+*/
+var b32decode = function(s) {
+    var r = new ArrayBuffer(s.length * 5 / 8);
+    var b = new Uint8Array(r);
+    for (var j = 0; j < s.length / 8; j++) {
+        var v = [0, 0, 0, 0, 0, 0, 0, 0];
+        for (var i = 0; i < 8; ++i) {
+            v[i] = alphabet.indexOf(s[j * 8 + i]);
+        }
+        var i = 0;
+        b[j * 5 + 0] = (v[i + 0] << 3) | (v[i + 1] >> 2);
+        b[j * 5 + 1] = ((v[i + 1] & 0x3) << 6) | (v[i + 2] << 1) | (v[i + 3] >> 4);
+        b[j * 5 + 2] = ((v[i + 3] & 0xf) << 4) | (v[i + 4] >> 1);
+        b[j * 5 + 3] = ((v[i + 4] & 0x1) << 7) | (v[i + 5] << 2) | (v[i + 6] >> 3);
+        b[j * 5 + 4] = ((v[i + 6] & 0x7) << 5) | (v[i + 7]);
+    }
+    return b;
+}
+
+module.exports = {
+    b32decode: b32decode,
+    b32encode: b32encode
+};
+},{}],44:[function(require,module,exports){
 // Base58 encoding/decoding
 // Originally written by Mike Hearn for BitcoinJ
 // Copyright (c) 2011 Google Inc
@@ -2582,8 +8686,8 @@ module.exports = {
     }
 };
 
-},{}],11:[function(require,module,exports){
-// Copyright (c) 2017 Pieter Wuille
+},{}],45:[function(require,module,exports){
+// Copyright (c) 2017, 2021 Pieter Wuille
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -2606,101 +8710,117 @@ module.exports = {
 var CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
 var GENERATOR = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
 
-module.exports = {
-  decode: decode,
-  encode: encode,
+const encodings = {
+    BECH32: "bech32",
+    BECH32M: "bech32m",
 };
 
+module.exports = {
+    decode: decode,
+    encode: encode,
+    encodings: encodings,
+    verifyChecksum: verifyChecksum
+};
+
+function getEncodingConst (enc) {
+    if (enc == encodings.BECH32) {
+        return 1;
+    } else if (enc == encodings.BECH32M) {
+        return 0x2bc830a3;
+    } else {
+        return null;
+    }
+}
 
 function polymod (values) {
-  var chk = 1;
-  for (var p = 0; p < values.length; ++p) {
-    var top = chk >> 25;
-    chk = (chk & 0x1ffffff) << 5 ^ values[p];
-    for (var i = 0; i < 5; ++i) {
-      if ((top >> i) & 1) {
-        chk ^= GENERATOR[i];
-      }
+    var chk = 1;
+    for (var p = 0; p < values.length; ++p) {
+        var top = chk >> 25;
+        chk = (chk & 0x1ffffff) << 5 ^ values[p];
+        for (var i = 0; i < 5; ++i) {
+            if ((top >> i) & 1) {
+                chk ^= GENERATOR[i];
+            }
+        }
     }
-  }
-  return chk;
+    return chk;
 }
 
 function hrpExpand (hrp) {
-  var ret = [];
-  var p;
-  for (p = 0; p < hrp.length; ++p) {
-    ret.push(hrp.charCodeAt(p) >> 5);
-  }
-  ret.push(0);
-  for (p = 0; p < hrp.length; ++p) {
-    ret.push(hrp.charCodeAt(p) & 31);
-  }
-  return ret;
-}
-
-function verifyChecksum (hrp, data) {
-  return polymod(hrpExpand(hrp).concat(data)) === 1;
-}
-
-function createChecksum (hrp, data) {
-  var values = hrpExpand(hrp).concat(data).concat([0, 0, 0, 0, 0, 0]);
-  var mod = polymod(values) ^ 1;
-  var ret = [];
-  for (var p = 0; p < 6; ++p) {
-    ret.push((mod >> 5 * (5 - p)) & 31);
-  }
-  return ret;
-}
-
-function encode (hrp, data) {
-  var combined = data.concat(createChecksum(hrp, data));
-  var ret = hrp + '1';
-  for (var p = 0; p < combined.length; ++p) {
-    ret += CHARSET.charAt(combined[p]);
-  }
-  return ret;
-}
-
-function decode (bechString) {
-  var p;
-  var has_lower = false;
-  var has_upper = false;
-  for (p = 0; p < bechString.length; ++p) {
-    if (bechString.charCodeAt(p) < 33 || bechString.charCodeAt(p) > 126) {
-      return null;
+    var ret = [];
+    var p;
+    for (p = 0; p < hrp.length; ++p) {
+        ret.push(hrp.charCodeAt(p) >> 5);
     }
-    if (bechString.charCodeAt(p) >= 97 && bechString.charCodeAt(p) <= 122) {
-        has_lower = true;
+    ret.push(0);
+    for (p = 0; p < hrp.length; ++p) {
+        ret.push(hrp.charCodeAt(p) & 31);
     }
-    if (bechString.charCodeAt(p) >= 65 && bechString.charCodeAt(p) <= 90) {
-        has_upper = true;
-    }
-  }
-  if (has_lower && has_upper) {
-    return null;
-  }
-  bechString = bechString.toLowerCase();
-  var pos = bechString.lastIndexOf('1');
-  if (pos < 1 || pos + 7 > bechString.length || bechString.length > 90) {
-    return null;
-  }
-  var hrp = bechString.substring(0, pos);
-  var data = [];
-  for (p = pos + 1; p < bechString.length; ++p) {
-    var d = CHARSET.indexOf(bechString.charAt(p));
-    if (d === -1) {
-      return null;
-    }
-    data.push(d);
-  }
-  if (!verifyChecksum(hrp, data)) {
-    return null;
-  }
-  return {hrp: hrp, data: data.slice(0, data.length - 6)};
+    return ret;
 }
 
-},{}],12:[function(require,module,exports){
+function verifyChecksum (hrp, data, enc) {
+    return polymod(hrpExpand(hrp).concat(data)) === getEncodingConst(enc);
+}
+
+function createChecksum (hrp, data, enc) {
+    var values = hrpExpand(hrp).concat(data).concat([0, 0, 0, 0, 0, 0]);
+    var mod = polymod(values) ^ getEncodingConst(enc);
+    var ret = [];
+    for (var p = 0; p < 6; ++p) {
+        ret.push((mod >> 5 * (5 - p)) & 31);
+    }
+    return ret;
+}
+
+function encode (hrp, data, enc) {
+    var combined = data.concat(createChecksum(hrp, data, enc));
+    var ret = hrp + '1';
+    for (var p = 0; p < combined.length; ++p) {
+        ret += CHARSET.charAt(combined[p]);
+    }
+    return ret;
+}
+
+function decode (bechString, enc) {
+    var p;
+    var has_lower = false;
+    var has_upper = false;
+    for (p = 0; p < bechString.length; ++p) {
+        if (bechString.charCodeAt(p) < 33 || bechString.charCodeAt(p) > 126) {
+            return null;
+        }
+        if (bechString.charCodeAt(p) >= 97 && bechString.charCodeAt(p) <= 122) {
+            has_lower = true;
+        }
+        if (bechString.charCodeAt(p) >= 65 && bechString.charCodeAt(p) <= 90) {
+            has_upper = true;
+        }
+    }
+    if (has_lower && has_upper) {
+        return null;
+    }
+    bechString = bechString.toLowerCase();
+    var pos = bechString.lastIndexOf('1');
+    if (pos < 1 || pos + 7 > bechString.length || bechString.length > 110) {
+        return null;
+    }
+    var hrp = bechString.substring(0, pos);
+    var data = [];
+    for (p = pos + 1; p < bechString.length; ++p) {
+        var d = CHARSET.indexOf(bechString.charAt(p));
+        if (d === -1) {
+            return null;
+        }
+        data.push(d);
+    }
+    if (!verifyChecksum(hrp, data, enc)) {
+        return null;
+    }
+    return {hrp: hrp, data: data.slice(0, data.length - 6)};
+}
+
+},{}],46:[function(require,module,exports){
 /*
 	JavaScript BigInteger library version 0.9.1
 	http://silentmatt.com/biginteger/
@@ -4151,8 +10271,8 @@ function decode (bechString) {
     
     exports.JSBigInt = BigInteger; // exports.BigInteger changed to exports.JSBigInt
     })(typeof exports !== 'undefined' ? exports : this);
-},{}],13:[function(require,module,exports){
-(function (Buffer){
+},{}],47:[function(require,module,exports){
+(function (Buffer){(function (){
 'use strict';
 
 /**
@@ -4184,7 +10304,7 @@ Blake256.u256 = [
     0xc0ac29b7, 0xc97c50dd, 0x3f84d5b5, 0xb5470917
 ]
 
-Blake256.padding = new Buffer([
+Blake256.padding = Buffer.from([
     0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -4204,7 +10324,7 @@ Blake256.prototype._length_carry = function (arr) {
 }
 
 Blake256.prototype.update = function (data, encoding) {
-    data = new Buffer(data, encoding);
+    data = Buffer.from(data, encoding);
     var block = this._block
     var offset = 0
 
@@ -4222,8 +10342,8 @@ Blake256.prototype.update = function (data, encoding) {
     return this;
 }
 
-var zo = new Buffer([0x01])
-var oo = new Buffer([0x81])
+var zo = Buffer.from([0x01])
+var oo = Buffer.from([0x81])
 
 function rot (x, n) {
     return ((x << (32 - n)) | (x >>> n)) >>> 0
@@ -4251,7 +10371,7 @@ function Blake256 () {
 
     this._s = [0, 0, 0, 0]
 
-    this._block = new Buffer(64)
+    this._block = Buffer.allocUnsafe(64)
     this._blockOffset = 0
     this._length = [0, 0]
 
@@ -4304,7 +10424,7 @@ Blake256.prototype._padding = function () {
         hi += 1
     }
 
-    var msglen = new Buffer(8)
+    var msglen = Buffer.allocUnsafe(8)
     msglen.writeUInt32BE(hi, 0)
     msglen.writeUInt32BE(lo, 4)
 
@@ -4335,14 +10455,15 @@ Blake256.prototype._padding = function () {
 Blake256.prototype.digest = function (encoding) {
     this._padding()
 
-    var buffer = new Buffer(32)
+    var buffer = Buffer.allocUnsafe(32)
     for (var i = 0; i < 8; ++i) buffer.writeUInt32BE(this._h[i], i * 4)
     return buffer.toString(encoding);
 }
 
 module.exports = Blake256;
-}).call(this,require("buffer").Buffer)
-},{"buffer":3}],14:[function(require,module,exports){
+
+}).call(this)}).call(this,require("buffer").Buffer)
+},{"buffer":4}],48:[function(require,module,exports){
 'use strict';
 
 /**
@@ -4619,7 +10740,8 @@ function toHex (n) {
 }
 
 module.exports = Blake2b;
-},{}],15:[function(require,module,exports){
+
+},{}],49:[function(require,module,exports){
 var JSBigInt = require('./biginteger')['JSBigInt'];
 
 /**
@@ -4846,8 +10968,8 @@ var cnBase58 = (function () {
     return b58;
 })();
 module.exports = cnBase58;
-},{"./biginteger":12}],16:[function(require,module,exports){
-// Copyright (c) 2017 Pieter Wuille
+},{"./biginteger":46}],50:[function(require,module,exports){
+// Copyright (c) 2017, 2021 Pieter Wuille
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -4870,70 +10992,99 @@ module.exports = cnBase58;
 var bech32 = require('./bech32');
 
 function convertbits (data, frombits, tobits, pad) {
-  var acc = 0;
-  var bits = 0;
-  var ret = [];
-  var maxv = (1 << tobits) - 1;
-  for (var p = 0; p < data.length; ++p) {
-    var value = data[p];
-    if (value < 0 || (value >> frombits) !== 0) {
-      return null;
+    var acc = 0;
+    var bits = 0;
+    var ret = [];
+    var maxv = (1 << tobits) - 1;
+    for (var p = 0; p < data.length; ++p) {
+        var value = data[p];
+        if (value < 0 || (value >> frombits) !== 0) {
+            return null;
+        }
+        acc = (acc << frombits) | value;
+        bits += frombits;
+        while (bits >= tobits) {
+            bits -= tobits;
+            ret.push((acc >> bits) & maxv);
+        }
     }
-    acc = (acc << frombits) | value;
-    bits += frombits;
-    while (bits >= tobits) {
-      bits -= tobits;
-      ret.push((acc >> bits) & maxv);
+    if (pad) {
+        if (bits > 0) {
+            ret.push((acc << (tobits - bits)) & maxv);
+        }
+    } else if (bits >= frombits || ((acc << (tobits - bits)) & maxv)) {
+        return null;
     }
-  }
-  if (pad) {
-    if (bits > 0) {
-      ret.push((acc << (tobits - bits)) & maxv);
-    }
-  } else if (bits >= frombits || ((acc << (tobits - bits)) & maxv)) {
-    return null;
-  }
-  return ret;
+    return ret;
 }
 
 function decode (hrp, addr) {
-  var dec = bech32.decode(addr);
-  if (dec === null || dec.hrp !== hrp || dec.data.length < 1 || dec.data[0] > 16) {
-    return null;
-  }
-  var res = convertbits(dec.data.slice(1), 5, 8, false);
-  if (res === null || res.length < 2 || res.length > 40) {
-    return null;
-  }
-  if (dec.data[0] === 0 && res.length !== 20 && res.length !== 32) {
-    return null;
-  }
-  return {version: dec.data[0], program: res};
+    var bech32m = false;
+    var dec = bech32.decode(addr, bech32.encodings.BECH32);
+    if (dec === null) {
+        dec = bech32.decode(addr, bech32.encodings.BECH32M);
+        bech32m = true;
+    }
+    if (dec === null || dec.hrp !== hrp || dec.data.length < 1 || dec.data[0] > 16) {
+        return null;
+    }
+    var res = convertbits(dec.data.slice(1), 5, 8, false);
+    if (res === null || res.length < 2 || res.length > 40) {
+        return null;
+    }
+    if (dec.data[0] === 0 && res.length !== 20 && res.length !== 32) {
+        return null;
+    }
+    if (dec.data[0] === 0 && bech32m) {
+        return null;
+    }
+    if (dec.data[0] !== 0 && !bech32m) {
+        return null;
+    }
+    return {version: dec.data[0], program: res};
 }
 
 function encode (hrp, version, program) {
-  var ret = bech32.encode(hrp, [version].concat(convertbits(program, 8, 5, true)));
-  if (decode(hrp, ret) === null) {
-    return null;
-  }
-  return ret;
+    var enc = bech32.encodings.BECH32;
+    if (version > 0) {
+        enc = bech32.encodings.BECH32M;
+    }
+    var ret = bech32.encode(hrp, [version].concat(convertbits(program, 8, 5, true)), enc);
+    if (decode(hrp, ret, enc) === null) {
+        return null;
+    }
+    return ret;
 }
 
-function isValidAddress(address, hrp) {
-    var hrp = hrp || 'bc';
-    var ret = decode(hrp, address);
+/////////////////////////////////////////////////////
 
-    if (ret === null) {
-        hrp = 'tb';
-        ret = decode(hrp, address);
-    }
+var DEFAULT_NETWORK_TYPE = 'prod'
 
-    if (ret === null) {
+function isValidAddress(address, currency, opts = {}) {
+
+    if(!currency.bech32Hrp || currency.bech32Hrp.length === 0) {
         return false;
     }
 
-    var recreate = encode(hrp, ret.version, ret.program);
-    return recreate === address.toLowerCase();
+    const { networkType = DEFAULT_NETWORK_TYPE} = opts;
+
+    var correctBech32Hrps;
+    if (networkType === 'prod' || networkType === 'testnet') {
+        correctBech32Hrps = currency.bech32Hrp[networkType];
+    } else if(currency.bech32Hrp) {
+        correctBech32Hrps = currency.bech32Hrp.prod.concat(currency.bech32Hrp.testnet)
+    } else {
+        return false;
+    }
+
+    for(var chrp of correctBech32Hrps) {
+        var ret = decode(chrp, address);
+        if(ret) {
+            return encode(chrp, ret.version, ret.program) === address.toLowerCase();
+        }
+    }
+
+    return false;
 }
 
 module.exports = {
@@ -4942,8 +11093,8 @@ module.exports = {
     isValidAddress: isValidAddress,
 };
 
-},{"./bech32":11}],17:[function(require,module,exports){
-(function (process,global){
+},{"./bech32":45}],51:[function(require,module,exports){
+(function (process,global){(function (){
 /**
  * [js-sha3]{@link https://github.com/emn178/js-sha3}
  *
@@ -5585,45 +11736,114 @@ var f = function (s) {
 
 module.exports = methods;
 
-}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"_process":6}],18:[function(require,module,exports){
-var jsSHA = require('jssha/src/sha256');
+}).call(this)}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"_process":35}],52:[function(require,module,exports){
+(function (Buffer){(function (){
+var jsSHA = require('jssha');
+var sha512256 = require('js-sha512').sha512_256
 var Blake256 = require('./blake256');
 var keccak256 = require('./sha3')['keccak256'];
 var Blake2B = require('./blake2b');
+var base58 = require('./base58');
+var base32 = require('./base32');
+var BigNum = require('browserify-bignum');
 
-function numberToHex (number) {
-    var hex = Math.round(number).toString(16);
-    if(hex.length === 1) {
+function numberToHex(number, length) {
+    var hex = number.toString(16);
+    if (hex.length % 2 === 1) {
         hex = '0' + hex;
     }
-    return hex;
+    return hex.padStart(length, '0');
 }
 
-function hexToUint8(hexString) {
-    var arr = [];
-    for (var i = 0; i < hexString.length; i += 2) {
-        arr.push(parseInt(hexString.substr(i, 2), 16));
+function isHexChar(c) {
+    if ((c >= 'A' && c <= 'F') ||
+        (c >= 'a' && c <= 'f') ||
+        (c >= '0' && c <= '9')) {
+        return 1;
     }
+    return 0;
+}
 
-    return new Uint8Array(arr);
+/* Convert a hex char to value */
+function hexChar2byte(c) {
+    var d = 0;
+    if (c >= 'A' && c <= 'F') {
+        d = c.charCodeAt(0) - 'A'.charCodeAt(0) + 10;
+    }
+    else if (c >= 'a' && c <= 'f') {
+        d = c.charCodeAt(0) - 'a'.charCodeAt(0) + 10;
+    }
+    else if (c >= '0' && c <= '9') {
+        d = c.charCodeAt(0) - '0'.charCodeAt(0);
+    }
+    return d;
+}
+
+/* Convert a byte to string */
+function byte2hexStr(byte) {
+    var hexByteMap = "0123456789ABCDEF";
+    var str = "";
+    str += hexByteMap.charAt(byte >> 4);
+    str += hexByteMap.charAt(byte & 0x0f);
+    return str;
+}
+
+function byteArray2hexStr(byteArray) {
+    var str = "";
+    for (var i = 0; i < (byteArray.length - 1); i++) {
+        str += byte2hexStr(byteArray[i]);
+    }
+    str += byte2hexStr(byteArray[i]);
+    return str;
+}
+
+function hexStr2byteArray(str) {
+    var byteArray = Array();
+    var d = 0;
+    var i = 0;
+    var j = 0;
+    var k = 0;
+
+     for (i = 0; i < str.length; i++) {
+        var c = str.charAt(i);
+        if (isHexChar(c)) {
+            d <<= 4;
+            d += hexChar2byte(c);
+            j++;
+            if (0 === (j % 2)) {
+                byteArray[k++] = d;
+                d = 0;
+            }
+        }
+    }
+    return byteArray;
 }
 
 module.exports = {
+    numberToHex: numberToHex,
     toHex: function (arrayOfBytes) {
         var hex = '';
-        for(var i = 0; i < arrayOfBytes.length; i++) {
+        for (var i = 0; i < arrayOfBytes.length; i++) {
             hex += numberToHex(arrayOfBytes[i]);
         }
         return hex;
     },
-    sha256: function (hexString) {
-        var sha = new jsSHA('SHA-256', 'HEX');
-        sha.update(hexString);
-        return sha.getHash('HEX');
+    sha256: function (payload, format = 'HEX') {
+        var sha = new jsSHA('SHA-256', format);
+        sha.update(payload);
+        return sha.getHash(format);
+    },
+    sha256x2: function (buffer, format = 'HEX') {
+        return this.sha256(this.sha256(buffer, format), format);
     },
     sha256Checksum: function (payload) {
         return this.sha256(this.sha256(payload)).substr(0, 8);
+    },
+    sha512_256: function (payload, format = 'HEX') {
+        const hash = sha512256.create()
+        hash.update(Buffer.from(payload, format))
+        return hash.hex().toUpperCase();
     },
     blake256: function (hexString) {
         return new Blake256().update(hexString, 'hex').digest('hex');
@@ -5632,254 +11852,724 @@ module.exports = {
         return this.blake256(this.blake256(payload)).substr(0, 8);
     },
     blake2b: function (hexString, outlen) {
-        return new Blake2B(outlen).update(hexToUint8(hexString)).digest('hex');
+        return new Blake2B(outlen).update(Buffer.from(hexString, 'hex')).digest('hex');
     },
     keccak256: function (hexString) {
         return keccak256(hexString);
     },
     keccak256Checksum: function (payload) {
         return keccak256(payload).toString().substr(0, 8);
-    }
-};
+    },
+    blake2b256: function (hexString) {
+        return new Blake2B(32).update(Buffer.from(hexString, 'hex'), 32).digest('hex');
+    },
+    base58: base58.decode,
+    byteArray2hexStr: byteArray2hexStr,
+    hexStr2byteArray: hexStr2byteArray,
+    bigNumberToBuffer: function(bignumber, size){
+        return new BigNum(bignumber).toBuffer({ size, endian: 'big' });
+    },
+    base32: base32
+}
 
-},{"./blake256":13,"./blake2b":14,"./sha3":17,"jssha/src/sha256":5}],19:[function(require,module,exports){
+}).call(this)}).call(this,require("buffer").Buffer)
+},{"./base32":43,"./base58":44,"./blake256":47,"./blake2b":48,"./sha3":51,"browserify-bignum":3,"buffer":4,"js-sha512":32,"jssha":33}],53:[function(require,module,exports){
 var XRPValidator = require('./ripple_validator');
 var ETHValidator = require('./ethereum_validator');
 var BTCValidator = require('./bitcoin_validator');
+var ADAValidator = require('./ada_validator');
 var XMRValidator = require('./monero_validator');
 var NANOValidator = require('./nano_validator');
-var BinanceValidator = require('./binance_validator');
+var SCValidator = require('./siacoin_validator');
+var TRXValidator = require('./tron_validator');
+var NEMValidator = require('./nem_validator');
+var LSKValidator = require('./lisk_validator');
+var BCHValidator = require('./bch_validator');
+var XLMValidator = require('./stellar_validator');
+var EOSValidator = require('./eos_validator');
+var XTZValidator = require('./tezos_validator');
+var USDTValidator = require('./usdt_validator');
+var AlgoValidator = require('./algo_validator');
+var DotValidator = require('./dot_validator');
+var BIP173Validator = require('./bip173_validator')
+var Base58Validator = require('./base58_validator')
 
 // defines P2PKH and P2SH address types for standard (prod) and testnet networks
 var CURRENCIES = [{
-    name: 'bitcoin',
-    symbol: 'btc',
-    addressTypes: {prod: ['00', '05'], testnet: ['6f', 'c4']},
-    validator: BTCValidator
-},{
-    name: 'bitcoincash',
-    symbol: 'bch',
-    addressTypes: {prod: ['00', '05'], testnet: ['6f', 'c4']},
-    validator: BTCValidator
-},{
-    name: 'litecoin',
-    symbol: 'ltc',
-    addressTypes: {prod: ['30', '05', '32'], testnet: ['6f', 'c4', '3a']},
-    validator: BTCValidator
-},{
-    name: 'peercoin',
-    symbol: 'ppc',
-    addressTypes: {prod: ['37', '75'], testnet: ['6f', 'c4']},
-    validator: BTCValidator
-},{
-    name: 'dogecoin',
-    symbol: 'doge',
-    addressTypes: {prod: ['1e', '16'], testnet: ['71', 'c4']},
-    validator: BTCValidator
-},{
-    name: 'beavercoin',
-    symbol: 'bvc',
-    addressTypes: {prod: ['19', '05'], testnet: ['6f', 'c4']},
-    validator: BTCValidator,
-},{
-    name: 'freicoin',
-    symbol: 'frc',
-    addressTypes: {prod: ['00', '05'], testnet: ['6f', 'c4']},
-    validator: BTCValidator
-},{
-    name: 'protoshares',
-    symbol: 'pts',
-    addressTypes: {prod: ['38', '05'], testnet: ['6f', 'c4']},
-    validator: BTCValidator
-},{
-    name: 'megacoin',
-    symbol: 'mec',
-    addressTypes: {prod: ['32', '05'], testnet: ['6f', 'c4']},
-    validator: BTCValidator
-},{
-    name: 'primecoin',
-    symbol: 'xpm',
-    addressTypes: {prod: ['17', '53'], testnet: ['6f', 'c4']},
-    validator: BTCValidator
-},{
-    name: 'auroracoin',
-    symbol: 'aur',
-    addressTypes: {prod: ['17', '05'], testnet: ['6f', 'c4']},
-    validator: BTCValidator
-},{
-    name: 'namecoin',
-    symbol: 'nmc',
-    addressTypes: {prod: ['34'], testnet: []},
-    validator: BTCValidator
-},{
-    name: 'biocoin',
-    symbol: 'bio',
-    addressTypes: {prod: ['19', '14'], testnet: ['6f', 'c4']},
-    validator: BTCValidator
-},{
-    name: 'garlicoin',
-    symbol: 'grlc',
-    addressTypes: {prod: ['26', '05'], testnet: ['6f', 'c4']},
-    validator: BTCValidator
-},{
-    name: 'vertcoin',
-    symbol: 'vtc',
-    addressTypes: {prod: ['0x', '47'], testnet: ['6f', 'c4']},
-    segwitHrp: 'vtc',
-    validator: BTCValidator
-},{
-    name: 'bitcoingold',
-    symbol: 'btg',
-    addressTypes: {prod: ['26', '17'], testnet: ['6f', 'c4']},
-    validator: BTCValidator
-},{
-    name: 'komodo',
-    symbol: 'kmd',
-    addressTypes: {prod: ['3c', '55'], testnet: ['0','5']},
-    validator: BTCValidator
-},{
-    name: 'bitcoinz',
-    symbol: 'btcz',
-    expectedLength: 26,
-    addressTypes: {prod: ['1cb8','1cbd'], testnet: ['1d25', '1cba']},
-    validator: BTCValidator
-},{
-    name: 'bitcoinprivate',
-    symbol: 'btcp',
-    expectedLength: 26,
-    addressTypes: {prod: ['1325','13af'], testnet: ['1957', '19e0']},
-    validator: BTCValidator
-},{
-    name: 'hush',
-    symbol: 'hush',
-    expectedLength: 26,
-    addressTypes: {prod: ['1cb8','1cbd'], testnet: ['1d25', '1cba']},
-    validator: BTCValidator
-},{
-    name: 'snowgem',
-    symbol: 'sng',
-    expectedLength: 26,
-    addressTypes: {prod: ['1c28','1c2d'], testnet: ['1d25', '1cba']},
-    validator: BTCValidator
-},{
-    name: 'zcash',
-    symbol: 'zec',
-    expectedLength: 26,
-    addressTypes: {prod: ['1cb8','1cbd'], testnet: ['1d25', '1cba']},
-    validator: BTCValidator
-},{
-    name: 'zclassic',
-    symbol: 'zcl',
-    expectedLength: 26,
-    addressTypes: {prod: ['1cb8','1cbd'], testnet: ['1d25', '1cba']},
-    validator: BTCValidator
-},{
-    name: 'zencash',
-    symbol: 'zen',
-    expectedLength: 26,
-    addressTypes: {prod: ['2089','2096'], testnet: ['2092','2098']},
-    validator: BTCValidator
-},{
-    name: 'votecoin',
-    symbol: 'vot',
-    expectedLength: 26,
-    addressTypes: {prod: ['1cb8','1cbd'], testnet: ['1d25', '1cba']},
-    validator: BTCValidator
-},{
-    name: 'decred',
-    symbol: 'dcr',
-    addressTypes: {prod: ['073f', '071a'], testnet: ['0f21', '0efc']},
-    hashFunction: 'blake256',
-    expectedLength: 26,
-    validator: BTCValidator
-},{
-    name: 'digibyte',
-    symbol: 'dgb',
-    addressTypes: {prod: ['1e'], testnet: []},
-    validator: BTCValidator
-},{
-    name: 'ethereum',
-    symbol: 'eth',
-    validator: ETHValidator,
-},{
-    name: 'etherzero',
-    symbol: 'etz',
-    validator: ETHValidator,
-},{
-    name: 'ethereumclassic',
-    symbol: 'etc',
-    validator: ETHValidator,
-},{
-    name: 'callisto',
-    symbol: 'clo',
-    validator: ETHValidator,
-},{
-    name: 'ripple',
-    symbol: 'xrp',
-    validator: XRPValidator,
-},{
-    name: 'dash',
-    symbol: 'dash',
-    addressTypes: {prod: ['4c', '10'], testnet: ['8c', '13']},
-    validator: BTCValidator
-},{
-    name: 'neo',
-    symbol: 'neo',
-    addressTypes: {prod: ['17'], testnet: []},
-    validator: BTCValidator
-},{
-    name: 'neogas',
-    symbol: 'gas',
-    addressTypes: {prod: ['17'], testnet: []},
-    validator: BTCValidator
-},{
-    name: 'qtum',
-    symbol: 'qtum',
-    addressTypes: {prod: ['3a', '32'], testnet: ['78', '6e']},
-    validator: BTCValidator
-},{
-    name: 'bankex',
-    symbol: 'bkx',
-    validator: ETHValidator
-},{
-    name: 'monero',
-    symbol: 'xmr',
-    addressTypes: {prod: ['18'], testnet: ['53']},
-    iAddressTypes: {prod: ['19'], testnet: ['54']},
-    validator: XMRValidator
-},{
-    name: 'nano',
-    symbol: 'nano',
-    validator: NANOValidator,
-},{
-    name: 'raiblocks',
-    symbol: 'xrb',
-    validator: NANOValidator,
-},{
-    name: 'luniverse',
-    symbol: 'luniverse',
-    validator: ETHValidator,
-},{
-    name: 'binance',
-    symbol: 'bnb',
-    validator: BinanceValidator,
-}];
+        name: 'Bitcoin',
+        symbol: 'btc',
+        addressTypes: { prod: ['00', '05'], testnet: ['6f', 'c4', '3c', '26'] },
+        bech32Hrp: { prod: ['bc'], testnet: ['tb'] },
+        validator: BTCValidator
+    }, {
+        name: 'BitcoinCash',
+        symbol: 'bch',
+        regexp: '^[qQpP]{1}[0-9a-zA-Z]{41}$',
+        addressTypes: { prod: ['00', '05'], testnet: ['6f', 'c4'] },
+        validator: BCHValidator
+    }, {
+        name: 'Bitcoin SV',
+        symbol: 'bsv',
+        regexp: '^[qQ]{1}[0-9a-zA-Z]{41}$',
+        addressTypes: { prod: ['00', '05'], testnet: ['6f', 'c4'] },
+        validator: BCHValidator
+    }, {
+        name: 'LiteCoin',
+        symbol: 'ltc',
+        addressTypes: { prod: ['30', '05', '32'], testnet: ['6f', 'c4', '3a'] },
+        bech32Hrp: { prod: ['ltc'], testnet: ['tltc'] },
+        validator: BTCValidator
+    }, {
+        name: 'PeerCoin',
+        symbol: 'ppc',
+        addressTypes: { prod: ['37', '75'], testnet: ['6f', 'c4'] },
+        validator: BTCValidator
+    }, {
+        name: 'DogeCoin',
+        symbol: 'doge',
+        addressTypes: { prod: ['1e', '16'], testnet: ['71', 'c4'] },
+        validator: BTCValidator
+    }, {
+        name: 'BeaverCoin',
+        symbol: 'bvc',
+        addressTypes: { prod: ['19', '05'], testnet: ['6f', 'c4'] },
+        validator: BTCValidator,
+    }, {
+        name: 'FreiCoin',
+        symbol: 'frc',
+        addressTypes: { prod: ['00', '05'], testnet: ['6f', 'c4'] },
+        validator: BTCValidator
+    }, {
+        name: 'ProtoShares',
+        symbol: 'pts',
+        addressTypes: { prod: ['38', '05'], testnet: ['6f', 'c4'] },
+        validator: BTCValidator
+    }, {
+        name: 'MegaCoin',
+        symbol: 'mec',
+        addressTypes: { prod: ['32', '05'], testnet: ['6f', 'c4'] },
+        validator: BTCValidator
+    }, {
+        name: 'PrimeCoin',
+        symbol: 'xpm',
+        addressTypes: { prod: ['17', '53'], testnet: ['6f', 'c4'] },
+        validator: BTCValidator
+    }, {
+        name: 'AuroraCoin',
+        symbol: 'aur',
+        addressTypes: { prod: ['17', '05'], testnet: ['6f', 'c4'] },
+        validator: BTCValidator
+    }, {
+        name: 'NameCoin',
+        symbol: 'nmc',
+        addressTypes: { prod: ['34'], testnet: [] },
+        validator: BTCValidator
+    }, {
+        name: 'BioCoin',
+        symbol: 'bio',
+        addressTypes: { prod: ['19', '14'], testnet: ['6f', 'c4'] },
+        validator: BTCValidator
+    }, {
+        name: 'GarliCoin',
+        symbol: 'grlc',
+        addressTypes: { prod: ['26', '05'], testnet: ['6f', 'c4'] },
+        validator: BTCValidator
+    }, {
+        name: 'VertCoin',
+        symbol: 'vtc',
+        addressTypes: { prod: ['0x', '47', '71', '05'], testnet: ['6f', 'c4'] },
+        validator: BTCValidator
+
+    }, {
+        name: 'BitcoinGold',
+        symbol: 'btg',
+        addressTypes: { prod: ['26', '17'], testnet: ['6f', 'c4'] },
+        validator: BTCValidator
+    }, {
+        name: 'Komodo',
+        symbol: 'kmd',
+        addressTypes: { prod: ['3c', '55'], testnet: ['0', '5'] },
+        validator: BTCValidator
+    }, {
+        name: 'BitcoinZ',
+        symbol: 'btcz',
+        expectedLength: 26,
+        addressTypes: { prod: ['1cb8', '1cbd'], testnet: ['1d25', '1cba'] },
+        validator: BTCValidator
+    }, {
+        name: 'BitcoinPrivate',
+        symbol: 'btcp',
+        expectedLength: 26,
+        addressTypes: { prod: ['1325', '13af'], testnet: ['1957', '19e0'] },
+        validator: BTCValidator
+    }, {
+        name: 'Hush',
+        symbol: 'hush',
+        expectedLength: 26,
+        addressTypes: { prod: ['1cb8', '1cbd'], testnet: ['1d25', '1cba'] },
+        validator: BTCValidator
+    }, {
+        name: 'SnowGem',
+        symbol: 'sng',
+        expectedLength: 26,
+        addressTypes: { prod: ['1c28', '1c2d'], testnet: ['1d25', '1cba'] },
+        validator: BTCValidator
+    }, {
+        name: 'ZCash',
+        symbol: 'zec',
+        expectedLength: 26,
+        addressTypes: { prod: ['1cb8', '1cbd'], testnet: ['1d25', '1cba'] },
+        validator: BTCValidator
+    }, {
+        name: 'ZClassic',
+        symbol: 'zcl',
+        expectedLength: 26,
+        addressTypes: { prod: ['1cb8', '1cbd'], testnet: ['1d25', '1cba'] },
+        validator: BTCValidator
+    }, {
+        name: 'ZenCash',
+        symbol: 'zen',
+        expectedLength: 26,
+        addressTypes: { prod: ['2089', '2096'], testnet: ['2092', '2098'] },
+        validator: BTCValidator
+    }, {
+        name: 'VoteCoin',
+        symbol: 'vot',
+        expectedLength: 26,
+        addressTypes: { prod: ['1cb8', '1cbd'], testnet: ['1d25', '1cba'] },
+        validator: BTCValidator
+    }, {
+        name: 'Decred',
+        symbol: 'dcr',
+        addressTypes: { prod: ['073f', '071a'], testnet: ['0f21', '0efc'] },
+        hashFunction: 'blake256',
+        expectedLength: 26,
+        validator: BTCValidator
+    }, {
+        name: 'GameCredits',
+        symbol: 'game',
+        addressTypes: { prod: ['26', '05'], testnet: [] },
+        validator: ETHValidator
+    }, {
+        name: 'PIVX',
+        symbol: 'pivx',
+        addressTypes: { prod: ['1e', '0d'], testnet: [] },
+        validator: BTCValidator
+    }, {
+        name: 'SolarCoin',
+        symbol: 'slr',
+        addressTypes: { prod: ['12', '05'], testnet: [] },
+        validator: BTCValidator
+    }, {
+        name: 'MonaCoin',
+        symbol: 'mona',
+        addressTypes: { prod: ['32', '37'], testnet: [] },
+        validator: BTCValidator
+    }, {
+        name: 'DigiByte',
+        symbol: 'dgb',
+        addressTypes: { prod: ['1e', '3f'], testnet: [] },
+        bech32Hrp: { prod: ['dgb', 'S'], testnet: [] },
+        validator: BTCValidator
+    }, {
+        name: 'Tether',
+        symbol: 'usdt',
+        addressTypes: { prod: ['00', '05'], testnet: ['6f', 'c4'] },
+        validator: USDTValidator
+    }, {
+        name: 'Ripple',
+        symbol: 'xrp',
+        validator: XRPValidator,
+    }, {
+        name: 'Dash',
+        symbol: 'dash',
+        addressTypes: { prod: ['4c', '10'], testnet: ['8c', '13'] },
+        validator: BTCValidator
+    }, {
+        name: 'Neo',
+        symbol: 'neo',
+        addressTypes: { prod: ['17'], testnet: [] },
+        validator: BTCValidator
+    }, {
+        name: 'NeoGas',
+        symbol: 'gas',
+        addressTypes: { prod: ['17'], testnet: [] },
+        validator: BTCValidator
+    }, {
+        name: 'Qtum',
+        symbol: 'qtum',
+        addressTypes: { prod: ['3a', '32'], testnet: ['78', '6e'] },
+        validator: BTCValidator
+    }, {
+        name: 'Waves',
+        symbol: 'waves',
+        addressTypes: { prod: ['0157'], testnet: ['0154'] },
+        expectedLength: 26,
+        hashFunction: 'blake256keccak256',
+        regex: /^[a-zA-Z0-9]{35}$/,
+        validator: BTCValidator
+    }, {
+        name: 'Ethereum',
+        symbol: 'eth',
+        validator: ETHValidator,
+    }, {
+        name: 'EtherZero',
+        symbol: 'etz',
+        validator: ETHValidator,
+    }, {
+        name: 'EthereumClassic',
+        symbol: 'etc',
+        validator: ETHValidator,
+    }, {
+        name: 'Callisto',
+        symbol: 'clo',
+        validator: ETHValidator,
+    }, {
+        name: 'Bankex',
+        symbol: 'bkx',
+        validator: ETHValidator
+    }, {
+        name: 'Cardano',
+        symbol: 'ada',
+        bech32Hrp: { prod: ['addr'], testnet: ['addr']},
+        validator: ADAValidator
+    }, {
+        name: 'Monero',
+        symbol: 'xmr',
+        addressTypes: { prod: ['18', '42'], testnet: ['53', '63'], stagenet: ['24'] },
+        iAddressTypes: { prod: ['19'], testnet: ['54'], stagenet: ['25'] },
+        validator: XMRValidator
+    }, {
+        name: 'Aragon',
+        symbol: 'ant',
+        validator: ETHValidator
+    }, {
+        name: 'Basic Attention Token',
+        symbol: 'bat',
+        validator: ETHValidator
+    }, {
+        name: 'Bancor',
+        symbol: 'bnt',
+        validator: ETHValidator
+    }, {
+        name: 'Civic',
+        symbol: 'cvc',
+        validator: ETHValidator
+    }, {
+        name: 'District0x',
+        symbol: 'dnt',
+        validator: ETHValidator
+    }, {
+        name: 'Gnosis',
+        symbol: 'gno',
+        validator: ETHValidator
+    }, {
+        name: 'Golem (GNT)',
+        symbol: 'gnt',
+        validator: ETHValidator
+    }, {
+        name: 'Golem',
+        symbol: 'glm',
+        validator: ETHValidator
+    },  {
+        name: 'Matchpool',
+        symbol: 'gup',
+        validator: ETHValidator
+    }, {
+        name: 'Melon',
+        symbol: 'mln',
+        validator: ETHValidator
+    }, {
+        name: 'Numeraire',
+        symbol: 'nmr',
+        validator: ETHValidator
+    }, {
+        name: 'OmiseGO',
+        symbol: 'omg',
+        validator: ETHValidator
+    }, {
+        name: 'TenX',
+        symbol: 'pay',
+        validator: ETHValidator
+    }, {
+        name: 'Ripio Credit Network',
+        symbol: 'rcn',
+        validator: ETHValidator
+    }, {
+        name: 'Augur',
+        symbol: 'rep',
+        validator: ETHValidator
+    }, {
+        name: 'iExec RLC',
+        symbol: 'rlc',
+        validator: ETHValidator
+    }, {
+        name: 'Salt',
+        symbol: 'salt',
+        validator: ETHValidator
+    }, {
+        name: 'Status',
+        symbol: 'snt',
+        validator: ETHValidator
+    }, {
+        name: 'Storj',
+        symbol: 'storj',
+        validator: ETHValidator
+    }, {
+        name: 'Swarm City',
+        symbol: 'swt',
+        validator: ETHValidator
+    }, {
+        name: 'TrueUSD',
+        symbol: 'tusd',
+        validator: ETHValidator
+    }, {
+        name: 'Wings',
+        symbol: 'wings',
+        validator: ETHValidator
+    }, {
+        name: '0x',
+        symbol: 'zrx',
+        validator: ETHValidator
+    }, {
+        name: 'Expanse',
+        symbol: 'exp',
+        validator: ETHValidator
+    }, {
+        name: 'Viberate',
+        symbol: 'vib',
+        validator: ETHValidator
+    }, {
+        name: 'Odyssey',
+        symbol: 'ocn',
+        validator: ETHValidator
+    }, {
+        name: 'Polymath',
+        symbol: 'poly',
+        validator: ETHValidator
+    }, {
+        name: 'Storm',
+        symbol: 'storm',
+        validator: ETHValidator
+    }, {
+        name: 'Nano',
+        symbol: 'nano',
+        validator: NANOValidator,
+    }, {
+        name: 'RaiBlocks',
+        symbol: 'xrb',
+        validator: NANOValidator,
+    }, {
+        name: 'Siacoin',
+        symbol: 'sc',
+        validator: SCValidator
+    }, {
+        name: 'HyperSpace',
+        symbol: 'xsc',
+        validator: SCValidator
+    }, {
+        name: 'loki',
+        symbol: 'loki',
+        addressTypes: { prod: ['114', '115', '116'], testnet: [] },
+        iAddressTypes: { prod: ['115'], testnet: [] },
+        validator: XMRValidator
+    }, {
+        name: 'LBRY Credits',
+        symbol: 'lbc',
+        addressTypes: { prod: ['55'], testnet: [] },
+        validator: BTCValidator
+    }, {
+        name: 'Tron',
+        symbol: 'trx',
+        addressTypes: { prod: [0x41], testnet: [0xa0] },
+        validator: TRXValidator
+    }, {
+        name: 'Nem',
+        symbol: 'xem',
+        validator: NEMValidator
+    }, {
+        name: 'Lisk',
+        symbol: 'lsk',
+        validator: LSKValidator
+    }, {
+        name: 'Stellar',
+        symbol: 'xlm',
+        validator: XLMValidator,
+    }, {
+        name: 'BTU Protocol',
+        symbol: 'btu',
+        validator: ETHValidator,
+    }, {
+        name: 'Crypto.com Coin',
+        symbol: 'cro',
+        bech32Hrp: { prod: ['cro'], testnet: ['tcro']},
+        validator: BIP173Validator,
+    }, {
+        name: 'Multi-collateral DAI',
+        symbol: 'dai',
+        validator: ETHValidator,
+    }, {
+        name: 'Enjin Coin',
+        symbol: 'enj',
+        validator: ETHValidator,
+    }, {
+        name: 'HedgeTrade',
+        symbol: 'hedg',
+        validator: ETHValidator,
+    }, {
+        name: 'Cred',
+        symbol: 'lba',
+        validator: ETHValidator,
+    }, {
+        name: 'Chainlink',
+        symbol: 'link',
+        validator: ETHValidator,
+    }, {
+        name: 'Loom Network',
+        symbol: 'loom',
+        validator: ETHValidator,
+    }, {
+        name: 'Maker',
+        symbol: 'mkr',
+        validator: ETHValidator,
+    }, {
+        name: 'Metal',
+        symbol: 'mtl',
+        validator: ETHValidator,
+    }, {
+        name: 'Ocean Protocol',
+        symbol: 'ocean',
+        validator: ETHValidator,
+    }, {
+        name: 'Quant',
+        symbol: 'qnt',
+        validator: ETHValidator,
+    }, {
+        name: 'Synthetix Network',
+        symbol: 'snx',
+        validator: ETHValidator,
+    }, {
+        name: 'SOLVE',
+        symbol: 'solve',
+        validator: ETHValidator,
+    }, {
+        name: 'Spendcoin',
+        symbol: 'spnd',
+        validator: ETHValidator,
+    }, {
+        name: 'TEMCO',
+        symbol: 'temco',
+        validator: ETHValidator,
+    }, {
+        name: 'EOS',
+        symbol: 'eos',
+        validator: EOSValidator
+    }, {
+        name: 'Tezos',
+        symbol: 'xtz',
+        validator: XTZValidator
+    }, {
+        name: 'VeChain',
+        symbol: 'vet',
+        validator: ETHValidator
+    },
+    {
+        name: 'StormX',
+        symbol: 'stmx',
+        validator: ETHValidator
+    },
+    {
+        name: 'AugurV2',
+        symbol: 'repv2',
+        validator: ETHValidator
+    },
+    {
+        name: 'FirmaChain',
+        symbol: 'fct',
+        validator: ETHValidator
+    },
+    {
+        name: 'BlockTrade',
+        symbol: 'btt',
+        validator: ETHValidator
+    },
+    {
+        name: 'Quantum Resistant Ledger',
+        symbol: 'qrl',
+        validator: ETHValidator
+    },
+    {
+        name: 'Serve',
+        symbol: 'serv',
+        validator: ETHValidator
+    },
+    {
+        name: 'Tap',
+        symbol: 'xtp',
+        validator: ETHValidator
+    },
+    {
+        name: 'Compound',
+        symbol: 'comp',
+        validator: ETHValidator
+    },
+    {
+        name: 'Paxos',
+        symbol: 'pax',
+        validator: ETHValidator
+    },
+    {
+        name: 'USD Coin',
+        symbol: 'usdc',
+        validator: ETHValidator
+    },
+    {
+        name: 'CUSD',
+        symbol: 'cusd',
+        validator: ETHValidator
+    },
+    {
+        name: 'Algorand',
+        symbol: 'algo',
+        validator: AlgoValidator
+    },
+    {
+        name: 'Polkadot',
+        symbol: 'dot',
+        validator: DotValidator
+    },
+    {
+        name: 'Uniswap Coin',
+        symbol: 'uni',
+        validator: ETHValidator
+    },
+    {
+        name: 'Aave Coin',
+        symbol: 'aave',
+        validator: ETHValidator
+    },
+    {
+        name: 'Matic',
+        symbol: 'matic',
+        validator: ETHValidator
+    },
+    {
+        name: 'Decentraland',
+        symbol: 'mana',
+        validator: ETHValidator
+    },
+    {
+        name: 'Solana',
+        symbol: 'sol',
+        validator: Base58Validator,
+        maxLength: 44,
+        minLength: 43
+    }
+];
 
 
-module.exports = {
+    module.exports = {
     getByNameOrSymbol: function (currencyNameOrSymbol) {
         var nameOrSymbol = currencyNameOrSymbol.toLowerCase();
-        for (var i = 0; i < CURRENCIES.length; i++) {
-            var currency = CURRENCIES[i];
-            if(currency.name === nameOrSymbol || currency.symbol === nameOrSymbol) {
-                return currency;
-            }
-        }
-        return null;
+        return CURRENCIES.find(function (currency) {
+            return currency.name.toLowerCase() === nameOrSymbol || currency.symbol.toLowerCase() === nameOrSymbol
+        });
+    },
+    getAll: function () {
+        return CURRENCIES;
     }
 };
 
-},{"./binance_validator":8,"./bitcoin_validator":9,"./ethereum_validator":20,"./monero_validator":21,"./nano_validator":22,"./ripple_validator":23}],20:[function(require,module,exports){
+////spit out details for readme.md
+// CURRENCIES
+//     .sort((a, b) => a.name.toUpperCase() > b.name.toUpperCase() ? 1 : -1)
+//     .forEach(c => console.log(`* ${c.name}/${c.symbol} \`'${c.name}'\` or \`'${c.symbol}'\` `));
+
+////spit out keywords for package.json
+// CURRENCIES
+//     .sort((a, b) => a.name.toUpperCase() > b.name.toUpperCase() ? 1 : -1)
+//     .forEach(c => console.log(`"${c.name}","${c.symbol}",`));
+//
+
+
+},{"./ada_validator":37,"./algo_validator":38,"./base58_validator":39,"./bch_validator":40,"./bip173_validator":41,"./bitcoin_validator":42,"./dot_validator":54,"./eos_validator":55,"./ethereum_validator":56,"./lisk_validator":57,"./monero_validator":58,"./nano_validator":59,"./nem_validator":60,"./ripple_validator":61,"./siacoin_validator":62,"./stellar_validator":63,"./tezos_validator":64,"./tron_validator":65,"./usdt_validator":66}],54:[function(require,module,exports){
+const cryptoUtils = require('./crypto/utils');
+
+// from https://github.com/paritytech/substrate/wiki/External-Address-Format-(SS58)
+const addressFormats = [
+    { addressLength: 3, accountIndexLength: 1, checkSumLength: 1 },
+    { addressLength: 4, accountIndexLength: 2, checkSumLength: 1 },
+    { addressLength: 5, accountIndexLength: 2, checkSumLength: 2 },
+    { addressLength: 6, accountIndexLength: 4, checkSumLength: 1 },
+    { addressLength: 7, accountIndexLength: 4, checkSumLength: 2 },
+    { addressLength: 8, accountIndexLength: 4, checkSumLength: 3 },
+    { addressLength: 9, accountIndexLength: 4, checkSumLength: 4 },
+    { addressLength: 10, accountIndexLength: 8, checkSumLength: 1 },
+    { addressLength: 11, accountIndexLength: 8, checkSumLength: 2 },
+    { addressLength: 12, accountIndexLength: 8, checkSumLength: 3 },
+    { addressLength: 13, accountIndexLength: 8, checkSumLength: 4 },
+    { addressLength: 14, accountIndexLength: 8, checkSumLength: 5 },
+    { addressLength: 15, accountIndexLength: 8, checkSumLength: 6 },
+    { addressLength: 16, accountIndexLength: 8, checkSumLength: 7 },
+    { addressLength: 17, accountIndexLength: 8, checkSumLength: 8 },
+    { addressLength: 34, accountIndexLength: 32, checkSumLength: 2 },
+];
+
+module.exports = {
+    isValidAddress: function (address, currency, opts = {}) {
+        const { networkType = 'prod' } = opts;
+
+        return this.verifyChecksum(address)
+    },
+
+    verifyChecksum: function (address) {
+
+        try {
+            const preImage = '53533538505245'
+
+            const decoded = cryptoUtils.base58(address);
+            const addressType = cryptoUtils.byteArray2hexStr(decoded.slice(0, 1));
+            const addressAndChecksum = decoded.slice(1)
+
+            // get the address format
+            const addressFormat = addressFormats.find(af => af.addressLength === addressAndChecksum.length);
+
+            if (!addressFormat) {
+                throw new Erorr('Invalid address length');
+            }
+
+            const decodedAddress = cryptoUtils.byteArray2hexStr(addressAndChecksum.slice(0, addressFormat.accountIndexLength));
+            const checksum = cryptoUtils.byteArray2hexStr(addressAndChecksum.slice(-addressFormat.checkSumLength));
+
+            const calculatedHash = cryptoUtils
+                .blake2b(preImage + addressType + decodedAddress, 64)
+                .substr(0, addressFormat.checkSumLength * 2)
+                .toUpperCase();
+
+            return calculatedHash == checksum;
+        } catch(err) {
+            return false;
+        }
+    }
+}
+
+},{"./crypto/utils":52}],55:[function(require,module,exports){
+function isValidEOSAddress (address, currency, networkType) {
+  var regex = /^[a-z0-9.]+$/g // Must be numbers, lowercase letters and decimal points only
+  if (address.search(regex) !== -1 && address.length === 12) {
+    return true
+  } else {
+    return false
+  }
+}
+
+module.exports = {
+  isValidAddress: function (address, currency, networkType) {
+    return isValidEOSAddress(address, currency, networkType)
+  }
+}
+
+},{}],56:[function(require,module,exports){
 var cryptoUtils = require('./crypto/utils');
 
 module.exports = {
@@ -5915,69 +12605,95 @@ module.exports = {
     }
 };
 
-},{"./crypto/utils":18}],21:[function(require,module,exports){
+},{"./crypto/utils":52}],57:[function(require,module,exports){
+(function (Buffer){(function (){
 var cryptoUtils = require('./crypto/utils');
-var cnBase58 = require('./crypto/cnBase58');
 
-var DEFAULT_NETWORK_TYPE = 'prod';
-var addressRegTest = new RegExp('^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{95}$');
-var integratedAddressRegTest = new RegExp('^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{106}$');
+var regexp = new RegExp('^[0-9]{1,20}L$');
 
-function validateNetwork(decoded, currency, networkType, addressType){
-    var network = currency.addressTypes;
-    if(addressType == 'integrated'){
-        network = currency.iAddressTypes;
-    }
-
-    switch(networkType){
-        case 'prod':
-            return parseInt(decoded.substr(0,2), 16) == network.prod[0];
-        case 'testnet':
-            return parseInt(decoded.substr(0,2), 16) == network.testnet[0];
-        case 'both':
-            return parseInt(decoded.substr(0,2), 16) == network.prod[0] || parseInt(decoded.substr(0,2), 16) == network.testnet[0];
-        default:
+module.exports = {
+    isValidAddress: function(address) {
+        if (!regexp.test(address)) {
             return false;
+        }
+        return this.verifyAddress(address)
+    },
+
+    verifyAddress: function(address) {
+        var BUFFER_SIZE = 8;
+        var bigNumber = address.substring(0, address.length - 1);
+        var addressBuffer = cryptoUtils.bigNumberToBuffer(bigNumber);
+        return Buffer.from(addressBuffer).slice(0, BUFFER_SIZE).equals(addressBuffer);
     }
+};
+}).call(this)}).call(this,require("buffer").Buffer)
+},{"./crypto/utils":52,"buffer":4}],58:[function(require,module,exports){
+var cryptoUtils = require('./crypto/utils')
+var cnBase58 = require('./crypto/cnBase58')
+
+var DEFAULT_NETWORK_TYPE = 'prod'
+var addressRegTest = new RegExp(
+  '^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{95}$'
+)
+var integratedAddressRegTest = new RegExp(
+  '^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{106}$'
+)
+
+function validateNetwork(decoded, currency, networkType, addressType) {
+  var network = currency.addressTypes
+  if (addressType == 'integrated') {
+    network = currency.iAddressTypes
+  }
+  var at = parseInt(decoded.substr(0, 2), 16).toString()
+
+  switch (networkType) {
+    case 'prod':
+      return network.prod.indexOf(at) >= 0
+    case 'testnet':
+      return network.testnet.indexOf(at) >= 0
+    case 'stagenet':
+      return network.stagenet.indexOf(at) >= 0
+    case 'both':
+      return network.prod.indexOf(at) >= 0 || network.testnet.indexOf(at) >= 0 || network.stagenet.indexOf(at) >= 0
+    default:
+      return false
+  }
 }
 
 function hextobin(hex) {
-    if (hex.length % 2 !== 0) return null;
-    var res = new Uint8Array(hex.length / 2);
-    for (var i = 0; i < hex.length / 2; ++i) {
-        res[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-    }
-    return res;
+  if (hex.length % 2 !== 0) return null
+  var res = new Uint8Array(hex.length / 2)
+  for (var i = 0; i < hex.length / 2; ++i) {
+    res[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+  }
+  return res
 }
 
 module.exports = {
-    isValidAddress: function (address, currency, networkType) {
-        networkType = networkType || DEFAULT_NETWORK_TYPE;
-        var addressType = 'standard';
-        if(!addressRegTest.test(address)){
-            if(integratedAddressRegTest.test(address)){
-                addressType = 'integrated';
-            }
-            else{
-                return false;
-            }
-        }
-
-        var decodedAddrStr = cnBase58.decode(address);
-        if(!decodedAddrStr)
-            return false;
-
-        if(!validateNetwork(decodedAddrStr, currency, networkType, addressType))
-            return false;
-
-        var addrChecksum = decodedAddrStr.slice(-8);
-        var hashChecksum = cryptoUtils.keccak256Checksum(hextobin(decodedAddrStr.slice(0, -8)));
-        
-        return addrChecksum === hashChecksum;
+  isValidAddress: function(address, currency, opts = {}) {
+    const { networkType = DEFAULT_NETWORK_TYPE} = opts;
+    var addressType = 'standard'
+    if (!addressRegTest.test(address)) {
+      if (integratedAddressRegTest.test(address)) {
+        addressType = 'integrated'
+      } else {
+        return false
+      }
     }
-};
 
-},{"./crypto/cnBase58":15,"./crypto/utils":18}],22:[function(require,module,exports){
+    var decodedAddrStr = cnBase58.decode(address)
+    if (!decodedAddrStr) return false
+
+    if (!validateNetwork(decodedAddrStr, currency, networkType, addressType)) return false
+
+    var addrChecksum = decodedAddrStr.slice(-8)
+    var hashChecksum = cryptoUtils.keccak256Checksum(hextobin(decodedAddrStr.slice(0, -8)))
+
+    return addrChecksum === hashChecksum
+  }
+}
+
+},{"./crypto/cnBase58":49,"./crypto/utils":52}],59:[function(require,module,exports){
 var cryptoUtils = require('./crypto/utils');
 var baseX = require('base-x');
 
@@ -6006,7 +12722,34 @@ module.exports = {
     }
 };
 
-},{"./crypto/utils":18,"base-x":1}],23:[function(require,module,exports){
+},{"./crypto/utils":52,"base-x":1}],60:[function(require,module,exports){
+(function (Buffer){(function (){
+var cryptoUtils = require('./crypto/utils');
+
+ /**
+* Check if an address is valid
+*
+* @param {string} _address - An address
+*
+* @return {boolean} - True if address is valid, false otherwise
+*/
+var isValidAddress = function(_address) {
+    var address = _address.toString().toUpperCase().replace(/-/g, '');
+    if (!address || address.length !== 40) {
+        return false;
+    }
+    var decoded = cryptoUtils.toHex(cryptoUtils.base32.b32decode(address));
+    var stepThreeChecksum = cryptoUtils.keccak256Checksum(Buffer.from(decoded.slice(0, 42), 'hex'));
+
+    return stepThreeChecksum === decoded.slice(42);
+};
+
+module.exports = {
+    isValidAddress: isValidAddress,
+}
+
+}).call(this)}).call(this,require("buffer").Buffer)
+},{"./crypto/utils":52,"buffer":4}],61:[function(require,module,exports){
 var cryptoUtils = require('./crypto/utils');
 var baseX = require('base-x');
 
@@ -6036,22 +12779,227 @@ module.exports = {
     }
 };
 
-},{"./crypto/utils":18,"base-x":1}],24:[function(require,module,exports){
+},{"./crypto/utils":52,"base-x":1}],62:[function(require,module,exports){
+var cryptoUtils = require('./crypto/utils')
+var isEqual = require('lodash.isequal')
+
+function hexToBytes(hex) {
+  var bytes = []
+  for (var c = 0; c < hex.length; c += 2) {
+    bytes.push(parseInt(hex.substr(c, 2), 16))
+  }
+  return bytes
+}
+
+module.exports = {
+  isValidAddress: function(address) {
+    if (address.length !== 76) {
+      // Check if it has the basic requirements of an address
+      return false
+    }
+
+    // Otherwise check each case
+    return this.verifyChecksum(address)
+  },
+  verifyChecksum: function(address) {
+    var checksumBytes = address.slice(0, 32*2)
+    var check = address.slice(32*2, 38*2)
+    var blakeHash = cryptoUtils.blake2b(checksumBytes, 32).slice(0, 6*2)
+    return !!isEqual(blakeHash, check)
+  }
+}
+
+},{"./crypto/utils":52,"lodash.isequal":34}],63:[function(require,module,exports){
+var baseX = require('base-x');
+var crc = require('crc');
+var cryptoUtils = require('./crypto/utils');
+
+var ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+var base32 = baseX(ALPHABET);
+var regexp = new RegExp('^[' + ALPHABET + ']{56}$');
+var ed25519PublicKeyVersionByte = (6 << 3);
+
+function swap16(number) {
+    var lower = number & 0xFF;
+    var upper = (number >> 8) & 0xFF;
+    return (lower << 8) | upper;
+}
+
+module.exports = {
+    isValidAddress: function (address) {
+        if (regexp.test(address)) {
+            return this.verifyChecksum(address);
+        }
+
+        return false;
+    },
+
+    verifyChecksum: function (address) {
+        // based on https://github.com/stellar/js-stellar-base/blob/master/src/strkey.js#L126
+        var bytes = base32.decode(address);
+        if (bytes[0] !== ed25519PublicKeyVersionByte) {
+            return false;
+        }
+
+        var computedChecksum = cryptoUtils.numberToHex(swap16(crc.crc16xmodem(bytes.slice(0, -2))), 4);
+        var checksum = cryptoUtils.toHex(bytes.slice(-2));
+
+        return computedChecksum === checksum
+    }
+};
+
+},{"./crypto/utils":52,"base-x":1,"crc":30}],64:[function(require,module,exports){
+const base58 = require('./crypto/base58');
+const cryptoUtils = require('./crypto/utils');
+
+const prefix = new Uint8Array([6, 161, 159]);
+
+function decodeRaw(buffer) {
+    let payload = buffer.slice(0, -4);
+    let checksum = buffer.slice(-4);
+    let newChecksum = cryptoUtils.hexStr2byteArray(
+        cryptoUtils.sha256x2(cryptoUtils.byteArray2hexStr(payload))
+    );
+
+    if (checksum[0] ^ newChecksum[0] |
+        checksum[1] ^ newChecksum[1] |
+        checksum[2] ^ newChecksum[2] |
+        checksum[3] ^ newChecksum[3])
+        return;
+    return payload;
+}
+
+const isValidAddress = function(address) {
+    try {
+        let buffer = base58.decode(address);
+        let payload = decodeRaw(buffer);
+        if (!payload)
+            return false;
+        payload.slice(prefix.length);
+        return true;
+    } catch (e) {
+        return false;
+    }
+};
+
+module.exports = {
+    isValidAddress
+};
+
+},{"./crypto/base58":44,"./crypto/utils":52}],65:[function(require,module,exports){
+var cryptoUtils = require('./crypto/utils');
+
+function decodeBase58Address(base58Sting) {
+    if (typeof (base58Sting) !== 'string') {
+        return false;
+    }
+    if (base58Sting.length <= 4) {
+        return false;
+    }
+
+    try {
+        var address = cryptoUtils.base58(base58Sting);
+    } catch (e) {
+        return false
+    }
+
+    /*if (base58Sting.length <= 4) {
+        return false;
+    }*/
+    var len = address.length;
+    var offset = len - 4;
+    var checkSum = address.slice(offset);
+    address = address.slice(0, offset);
+    var hash0 = cryptoUtils.sha256(cryptoUtils.byteArray2hexStr(address));
+    var hash1 = cryptoUtils.hexStr2byteArray(cryptoUtils.sha256(hash0));
+    var checkSum1 = hash1.slice(0, 4);
+    if (checkSum[0] === checkSum1[0] && checkSum[1] === checkSum1[1] && checkSum[2]
+        === checkSum1[2] && checkSum[3] === checkSum1[3]
+    ) {
+        return address;
+    }
+
+    return false;
+}
+
+function getEnv(currency, networkType) {
+    var evn = networkType || 'prod';
+
+    if (evn !== 'prod' && evn !== 'testnet') evn = 'prod';
+
+    return currency.addressTypes[evn][0]
+}
+
+module.exports = {
+    /**
+     * tron address validation
+     */
+    isValidAddress: function (mainAddress, currency, opts) {
+        var networkType = opts ? opts.networkType : '';
+        var address = decodeBase58Address(mainAddress);
+
+        if (!address) {
+            return false;
+        }
+
+        if (address.length !== 21) {
+            return false;
+        }
+
+        return getEnv(currency, networkType) === address[0];
+    }
+};
+
+},{"./crypto/utils":52}],66:[function(require,module,exports){
+var BTCValidator = require('./bitcoin_validator');
+var ETHValidator = require('./ethereum_validator');
+
+function checkBothValidators(address, currency, networkType) {
+    var result = BTCValidator.isValidAddress(address, currency, networkType);
+    return result ? result :
+        ETHValidator.isValidAddress(address, currency, networkType);
+}
+
+module.exports = {
+    isValidAddress: function (address, currency, opts) {
+        if (opts) {
+            if (opts.chainType === 'erc20') {
+                return ETHValidator.isValidAddress(address, currency, opts.networkType);
+            } else if (opts.chainType === 'omni') {
+                return BTCValidator.isValidAddress(address, currency, opts.networkType);
+            }
+        }
+        return checkBothValidators(address, currency, opts);
+    }
+};
+
+},{"./bitcoin_validator":42,"./ethereum_validator":56}],67:[function(require,module,exports){
 var currencies = require('./currencies');
 
 var DEFAULT_CURRENCY_NAME = 'bitcoin';
 
 module.exports = {
-    validate: function (address, currencyNameOrSymbol, networkType) {
+    //validate: function (address, currencyNameOrSymbol, networkType) {
+    validate: function (address, currencyNameOrSymbol, opts) {
         var currency = currencies.getByNameOrSymbol(currencyNameOrSymbol || DEFAULT_CURRENCY_NAME);
 
-        if (currency.validator) {
-            return currency.validator.isValidAddress(address, currency, networkType);
+        if (currency && currency.validator) {
+            if (opts && typeof opts === 'string') {
+                return currency.validator.isValidAddress(address, currency, { networkType: opts });
+            }
+            return currency.validator.isValidAddress(address, currency, opts);
         }
 
         throw new Error('Missing validator for currency: ' + currencyNameOrSymbol);
     },
+    getCurrencies: function () {
+        return currencies.getAll();
+    },
+    findCurrency: function(symbol) {
+        return currencies.getByNameOrSymbol(symbol) || null ;
+    }
 };
 
-},{"./currencies":19}]},{},[24])(24)
+},{"./currencies":53}]},{},[67])(67)
 });
