@@ -16,9 +16,14 @@ function getDecoded(address) {
 function getChecksum(hashFunction, payload) {
     // Each currency may implement different hashing algorithm
     switch (hashFunction) {
+        // blake then keccak hash chain
+        case 'blake256keccak256':
+            var blake = cryptoUtils.blake2b256(payload);
+            return cryptoUtils.keccak256Checksum(Buffer.from(blake, 'hex'));
         case 'blake256':
             return cryptoUtils.blake256Checksum(payload);
-            break;
+        case 'keccak256':
+            return cryptoUtils.keccak256Checksum(payload);
         case 'sha256':
         default:
             return cryptoUtils.sha256Checksum(payload);
@@ -39,6 +44,12 @@ function getAddressType(address, currency) {
             return null;
         }
 
+        if(currency.regex) {
+            if(!currency.regex.test(address)) {
+                return false;
+            }
+        }
+
         var checksum = cryptoUtils.toHex(decoded.slice(length - 4, length)),
             body = cryptoUtils.toHex(decoded.slice(0, length - 4)),
             goodChecksum = getChecksum(hashFunction, body);
@@ -49,8 +60,8 @@ function getAddressType(address, currency) {
     return null;
 }
 
-function isValidP2PKHandP2SHAddress(address, currency, networkType) {
-    networkType = networkType || DEFAULT_NETWORK_TYPE;
+function isValidP2PKHandP2SHAddress(address, currency, opts) {
+    const { networkType = DEFAULT_NETWORK_TYPE} = opts;
 
     var correctAddressTypes;
     var addressType = getAddressType(address, currency);
@@ -58,8 +69,10 @@ function isValidP2PKHandP2SHAddress(address, currency, networkType) {
     if (addressType) {
         if (networkType === 'prod' || networkType === 'testnet') {
             correctAddressTypes = currency.addressTypes[networkType]
-        } else {
+        } else if (currency.addressTypes) {
             correctAddressTypes = currency.addressTypes.prod.concat(currency.addressTypes.testnet);
+        } else {
+            return false;
         }
 
         return correctAddressTypes.indexOf(addressType) >= 0;
@@ -69,7 +82,7 @@ function isValidP2PKHandP2SHAddress(address, currency, networkType) {
 }
 
 module.exports = {
-    isValidAddress: function (address, currency, networkType) {
-        return isValidP2PKHandP2SHAddress(address, currency, networkType) || segwit.isValidAddress(address, currency.segwitHrp);
+    isValidAddress: function (address, currency, opts = {}) {
+        return isValidP2PKHandP2SHAddress(address, currency, opts) || segwit.isValidAddress(address, currency, opts);
     }
 };
