@@ -4,6 +4,10 @@ var BTCValidator = require('./bitcoin_validator');
 var XMRValidator = require('./monero_validator');
 var NANOValidator = require('./nano_validator');
 var BinanceValidator = require('./binance_validator');
+var DotValidator = require('./dot_validator');
+var ADAValidator = require('./ada_validator');
+var Base58Validator = require('./base58_validator');
+var XTZValidator = require('./tezos_validator');
 
 // defines P2PKH and P2SH address types for standard (prod) and testnet networks
 var CURRENCIES = [{
@@ -218,7 +222,31 @@ var CURRENCIES = [{
     name: 'binance',
     symbol: 'bnb',
     validator: BinanceValidator,
-}];
+},
+{
+    name: 'Polkadot',
+    symbol: 'dot',
+    validator: DotValidator
+},
+{
+    name: 'Cardano',
+    symbol: 'ada',
+    bech32Hrp: { prod: ['addr'], testnet: ['addr']},
+    validator: ADAValidator
+},
+{
+    name: 'Solana',
+    symbol: 'sol',
+    validator: Base58Validator,
+    maxLength: 44,
+    minLength: 43
+},
+{
+    name: 'Tezos',
+    symbol: 'xtz',
+    validator: XTZValidator
+},
+];
 
 
 module.exports = {
