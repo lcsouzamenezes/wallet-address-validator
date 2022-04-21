@@ -1534,6 +1534,16 @@ describe('invalid results', function () {
         invalid('xrb_1111111112111111111111111111111111111111111111111111hifc8npp', 'bnb');
         invalid('nano_111111111111111111111111111111111111111111111111111hifc8npp', 'bnb');
     });
+
+    it('should return true for correct terra address', function () {
+        valid('terra1dcegyrekltswvyy0xy69ydgxn9x8x32zdtapd8', 'luna');
+    });
+    
+    it('should return false for incorrect terra addresses', function () {
+        invalid('terra1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'luna');
+        invalid('cosmos1zz22dfpvw3zqpeyhvhmx944a588fgcalw744ts', 'luna');
+        invalid('random string', 'luna');
+    });
 });
 
 

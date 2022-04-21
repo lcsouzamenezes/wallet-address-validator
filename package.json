@@ -122,7 +122,8 @@
         "Wings","wings",
         "ZCash","zec",
         "ZClassic","zcl",
-        "ZenCash","zen"
+        "ZenCash","zen",
+        "Terra","luna"
     ],
     "version": "0.5.5",
     "author": "Chris <chris.tsim@gmail.com>",

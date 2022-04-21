@@ -11905,6 +11905,7 @@ var DotValidator = require('./dot_validator');
 var BIP173Validator = require('./bip173_validator')
 var Base58Validator = require('./base58_validator')
 var BinanceValidator = require('./binance_validator');
+var TerraValidator = require('./terra_validator');
 
 // defines P2PKH and P2SH address types for standard (prod) and testnet networks
 var CURRENCIES = [{
@@ -12484,6 +12485,10 @@ var CURRENCIES = [{
         name: 'binance',
         symbol: 'bnb',
         validator: BinanceValidator,
+    },{
+        name: 'terra',
+        symbol: 'luna',
+        validator: TerraValidator,
     }
 ];
 
@@ -12512,7 +12517,7 @@ var CURRENCIES = [{
 //
 
 
-},{"./ada_validator":37,"./algo_validator":38,"./base58_validator":39,"./bch_validator":40,"./binance_validator":41,"./bip173_validator":42,"./bitcoin_validator":43,"./dot_validator":55,"./eos_validator":56,"./ethereum_validator":57,"./lisk_validator":58,"./monero_validator":59,"./nano_validator":60,"./nem_validator":61,"./ripple_validator":62,"./siacoin_validator":63,"./stellar_validator":64,"./tezos_validator":65,"./tron_validator":66,"./usdt_validator":67}],55:[function(require,module,exports){
+},{"./ada_validator":37,"./algo_validator":38,"./base58_validator":39,"./bch_validator":40,"./binance_validator":41,"./bip173_validator":42,"./bitcoin_validator":43,"./dot_validator":55,"./eos_validator":56,"./ethereum_validator":57,"./lisk_validator":58,"./monero_validator":59,"./nano_validator":60,"./nem_validator":61,"./ripple_validator":62,"./siacoin_validator":63,"./stellar_validator":64,"./terra_validator":65,"./tezos_validator":66,"./tron_validator":67,"./usdt_validator":68}],55:[function(require,module,exports){
 const cryptoUtils = require('./crypto/utils');
 
 // from https://github.com/paritytech/substrate/wiki/External-Address-Format-(SS58)
@@ -12870,6 +12875,16 @@ module.exports = {
 };
 
 },{"./crypto/utils":53,"base-x":1,"crc":30}],65:[function(require,module,exports){
+var bech32 = require('./crypto/bech32');
+
+module.exports = {
+    isValidAddress: function (address, currency, opts) {
+      const decoded = bech32.decode(address, bech32.encodings.BECH32);
+      return decoded !== null && decoded.hrp.startsWith('terra');
+    }
+};
+
+},{"./crypto/bech32":46}],66:[function(require,module,exports){
 const base58 = require('./crypto/base58');
 const cryptoUtils = require('./crypto/utils');
 
@@ -12907,7 +12922,7 @@ module.exports = {
     isValidAddress
 };
 
-},{"./crypto/base58":45,"./crypto/utils":53}],66:[function(require,module,exports){
+},{"./crypto/base58":45,"./crypto/utils":53}],67:[function(require,module,exports){
 var cryptoUtils = require('./crypto/utils');
 
 function decodeBase58Address(base58Sting) {
@@ -12971,7 +12986,7 @@ module.exports = {
     }
 };
 
-},{"./crypto/utils":53}],67:[function(require,module,exports){
+},{"./crypto/utils":53}],68:[function(require,module,exports){
 var BTCValidator = require('./bitcoin_validator');
 var ETHValidator = require('./ethereum_validator');
 
@@ -12994,7 +13009,7 @@ module.exports = {
     }
 };
 
-},{"./bitcoin_validator":43,"./ethereum_validator":57}],68:[function(require,module,exports){
+},{"./bitcoin_validator":43,"./ethereum_validator":57}],69:[function(require,module,exports){
 var currencies = require('./currencies');
 
 var DEFAULT_CURRENCY_NAME = 'bitcoin';
@@ -13021,5 +13036,5 @@ module.exports = {
     }
 };
 
-},{"./currencies":54}]},{},[68])(68)
+},{"./currencies":54}]},{},[69])(69)
 });
