@@ -1536,13 +1536,13 @@ describe('invalid results', function () {
     });
 
     it('should return true for correct terra address', function () {
-        valid('terra1dcegyrekltswvyy0xy69ydgxn9x8x32zdtapd8', 'luna');
+        valid('terra1dcegyrekltswvyy0xy69ydgxn9x8x32zdtapd8', 'terra');
     });
     
     it('should return false for incorrect terra addresses', function () {
-        invalid('terra1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'luna');
-        invalid('cosmos1zz22dfpvw3zqpeyhvhmx944a588fgcalw744ts', 'luna');
-        invalid('random string', 'luna');
+        invalid('terra1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'terra');
+        invalid('cosmos1zz22dfpvw3zqpeyhvhmx944a588fgcalw744ts', 'terra');
+        invalid('random string', 'terra');
     });
 });
 

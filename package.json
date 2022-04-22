@@ -123,7 +123,7 @@
         "ZCash","zec",
         "ZClassic","zcl",
         "ZenCash","zen",
-        "Terra","luna"
+        "Terra","terra"
     ],
     "version": "0.5.5",
     "author": "Chris <chris.tsim@gmail.com>",

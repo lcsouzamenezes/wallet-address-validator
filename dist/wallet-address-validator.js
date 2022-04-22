@@ -12487,7 +12487,7 @@ var CURRENCIES = [{
         validator: BinanceValidator,
     },{
         name: 'terra',
-        symbol: 'luna',
+        symbol: 'terra',
         validator: TerraValidator,
     }
 ];
